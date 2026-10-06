@@ -1,0 +1,16 @@
+services:
+  db:
+    build: { context: ./deploy, dockerfile: db.Dockerfile }
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: geo
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./deploy/initdb:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d geo"]
+      interval: 5s
+      retries: 10
+volumes: { pgdata: {} }
