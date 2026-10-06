@@ -294,10 +294,11 @@ clock is the source scene metadata / ingest time, not the browser):**
 
 ## 11. Open Risks
 
-- **Sentinel-2 access**: Earth Search STAC is auth-free (verified), but the
-  underlying S3 asset layer could be requester-pays → **watch at M2**: the
-  one-scene download smoke test catches it immediately; fallback is a second
-  open mirror or a pre-seeded chip dump shipped with the repo.
+- **Sentinel-2 access** (largely retired 2026-10-06 by live probe): Earth
+  Search STAC + public COG bucket both proven auth-free (HEAD/GET/range-GET).
+  Residual risk is a future bucket-policy change → pinned by the one-scene
+  smoke test; fallback ladder: windowed/full HTTPS fetch → Microsoft Planetary
+  Computer → fixture-only degraded mode with honest coverage manifest.
 - **Sentinel-2 cloud cover** over the Red Sea → scene filter (≤ 20% cloud)
   recorded in the coverage manifest; honest README note.
 - **CPU text-encode latency** may exceed 400 ms under load → mitigate with

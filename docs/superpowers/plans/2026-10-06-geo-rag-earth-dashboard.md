@@ -29,7 +29,7 @@
 
 Input classes / failure modes the spec implies but that no single happy-path task exercises — each is pinned to a task below:
 
-1. **Earth Search S3 assets may be requester-pays** → Task 11 smoke-downloads exactly one scene and asserts a file > 1 MB lands on disk (catches auth/pays failure on day one of ETL).
+1. **Earth Search asset access** (was: may be requester-pays — **retired 2026-10-06 by live probe**: public COG bucket `sentinel-cogs.s3.us-west-2.amazonaws.com`, HEAD/GET/range-GET all succeed unauthenticated; see Task 11) → smoke test still pins the contract so a future bucket policy change fails loudly.
 2. **Refresh-token reuse after rotation** (stolen/ replayed cookie must be rejected, not silently accepted) → Task 5 test: consumed refresh token reuse → 401 + row revoked.
 3. **Every protected route must reject unauthenticated calls** — not just the ones the author remembered → Task 4 parametrized authz sweep over the full route matrix.
 4. **Encoder dimension drift** (model output must be 512 or pgvector insert corrupts) → Task 6 asserts `encode_text`/`encode_image` shapes end-to-end; Task 7 search test fails loudly on dim mismatch.
@@ -820,13 +820,13 @@ def test_one_scene_downloads(tmp_path):
     assert (tmp_path / "manifest.json").exists()
 ```
 
-- [ ] **Step 2: Run to verify failure** — `cd etl && pip install -r requirements.txt && pytest tests/test_download.py -v -m smoke` → FAIL (module missing). *This is the task that catches the spec's #1 open risk — if the S3 layer demands payment/auth, this test fails here, before any other ETL work.*
-- [ ] **Step 3: Implement** with `pystac-client` + `requests` streaming. **Asset-URL policy (prevention for the requester-pays risk):** for each STAC item, pick asset hrefs in this order — (1) `https://` hrefs (including `alternate.https` when the item uses the alternate-assets extension), (2) `s3://` only as last resort. If a fetch returns 403/`AccessDenied`, apply the **fallback ladder** in order, logging each switch:
-  1. Retry remaining assets of the same scene over HTTPS if the first hit was `s3://`.
-  2. Switch the catalog client to **Microsoft Planetary Computer** (`https://planetarycomputer.microsoft.com/api/stac/v1`, same `sentinel-2-l2a` collection; sign asset URLs via the public `planetarycomputer.microsoft.com/api/sas/v1/sign` endpoint — no account). The STAC-query/fetch interface is unchanged; only the catalog base URL + signing step differ.
-  3. If both catalogs fail: run in degraded mode — skip downloads, leave the fixture dump as the demo data source, and record in `ETL_CACHE_DIR/manifest.json` that coverage is fixture-only (spec §7 honesty requirement). Never crash the demo path.
+- [ ] **Step 2: Run to verify failure** — `cd etl && pip install -r requirements.txt && pytest tests/test_download.py -v -m smoke` → FAIL (module missing). *This task pins a contract that a live probe already satisfied (2026-10-06): the smoke test fails loudly if the bucket's policy ever changes.*
+- [ ] **Step 3: Implement** with `pystac-client` + `requests` streaming. **Verified facts (probe 2026-10-06, keep as comments in the module):**
+  - Band assets are **Cloud-Optimized GeoTIFFs** on the public bucket `sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/...` — `Cache-Control: public`, `Accept-Ranges: bytes`, no auth, no requester-pays (HEAD 200 / GET 200 / range-GET 206 all proven; e.g. `S2A_37QDD_20250929_0_L2A/B02.tif` = 116,745,801 bytes, 10980×10980 uint16).
+  - Auxiliary `s3://sentinel-s2-l2a/...` assets (`cloud`, `snow`, `product_metadata`) are NOT needed — skip them.
+  - `thumbnail` = small JPEG (`preview.jpg`), usable directly as UI thumb before chips are extracted.
 
-  On any unrecoverable fetch error, raise a clear message naming the ladder outcome — never a bare traceback.
+  **Asset-URL policy:** pick `https://` COG hrefs (B04/B08/B03/B02); never the raw `s3://` aux assets. Because the COGs support range reads, prefer **windowed reads via rasterio's `/vsicurl/`** in Task 12 over full-file downloads — a 512-px chip needs only a few hundred KB of range traffic instead of ~450 MB per scene. Keep the fallback ladder for future policy changes: (1) full-file download of the same HTTPS href, (2) Microsoft Planetary Computer catalog (`planetarycomputer.microsoft.com/api/stac/v1` + public SAS signing endpoint), (3) degraded mode — fixture-only, coverage recorded in the manifest (spec §7). On any unrecoverable error, raise a message naming the ladder outcome — never a bare traceback.
 - [ ] **Step 4: Run to verify pass** → PASS (network test; CI marks `smoke` as allowed-failure-with-annotation only if flaky — local run is authoritative).
 - [ ] **Step 5:** commit `feat: Earth Search STAC scene downloader with one-scene smoke test"`.
 
@@ -839,8 +839,8 @@ def test_one_scene_downloads(tmp_path):
 - Modify: `etl/requirements.txt` (+`rasterio`, `numpy`)
 
 **Interfaces:**
-- Consumes: Task 11 manifest + TIFFs.
-- Produces: `extract_chips(scene_dir: Path, out_dir: Path | None = None, chip_size=512, stride=128) -> list[ChipRecord]` where `ChipRecord = {chip_id: uuid5(scene_id+row+col), chip_path, bbox: (w,s,e,n), scene_datetime}`; `out_dir` **defaults to `data/thumbs` — the same directory `Settings.thumbs_dir` serves from** (Task 9); writes `{out_dir}/{chip_id}.jpg` (RGB preview) + `{chip_id}.npy` (4-band float array, sibling cache dir) and `chips_manifest.jsonl`. Task 13 reads this. **Missing band in a scene → scene skipped with a WARNING log line** (spec §7), never a crash.
+- Consumes: Task 11 manifest + TIFFs (local cache) **or scene asset URLs directly** — the probe (2026-10-06) proved the COGs support `Accept-Ranges: bytes`, so implement the primary path as **windowed reads via rasterio `rasterio.open(" /vsicurl/" + href)`** (read only each 512-px window over HTTP range requests); fall back to full local files when `scene_dir` is given.
+- Produces: `extract_chips(scene_dir: Path | None = None, scene_urls: dict[str, str] | None = None, out_dir: Path | None = None, chip_size=512, stride=128) -> list[ChipRecord]` where `ChipRecord = {chip_id: uuid5(scene_id+row+col), chip_path, bbox: (w,s,e,n), scene_datetime}`; `out_dir` **defaults to `data/thumbs` — the same directory `Settings.thumbs_dir` serves from** (Task 9); writes `{out_dir}/{chip_id}.jpg` (RGB preview) + `{chip_id}.npy` (4-band float array, sibling cache dir) and `chips_manifest.jsonl`. Task 13 reads this. **Missing band in a scene → scene skipped with a WARNING log line** (spec §7), never a crash.
 
 - [ ] **Step 1: Write failing golden test**: build 1024×1024 synthetic GeoTIFF with known transform in-test → extract with chip_size=512, stride=512 → expect 4 chips; assert chip 0 bbox ≈ transform-derived corners within 1e-6; assert deterministic `chip_id` stable across runs.
 - [ ] **Step 2: Run → FAIL.** **Step 3: Implement** with `rasterio.windows.Window` + `rasterio.windows.transform`. **Step 4: Run → PASS.** **Step 5:** commit `feat: 512px chip extractor with georeferenced golden test"`.
