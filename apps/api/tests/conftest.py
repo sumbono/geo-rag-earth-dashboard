@@ -1,6 +1,8 @@
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from uuid import uuid4
 
 import jwt as pyjwt
 import pytest
@@ -123,3 +125,15 @@ def seeded_tiles(engine_session):
             out["coral"] = t
     engine_session.commit()
     return out
+
+
+@pytest.fixture()
+def tmp_thumbs(tmp_path, monkeypatch) -> Path:
+    d = tmp_path / "thumbs"; d.mkdir()
+    monkeypatch.setenv("THUMBS_DIR", str(d))
+    return d
+
+def write_thumb(thumbs_dir: Path, data: bytes) -> str:
+    tid = str(uuid4())
+    (thumbs_dir / f"{tid}.jpg").write_bytes(data)
+    return tid
