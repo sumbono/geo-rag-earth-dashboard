@@ -145,7 +145,10 @@ Earth Search STAC (verified 2026-10-06; no auth)
 ```
 
 ETL is **resumable and idempotent** (upsert by chip id; skips chips already
-embedded), so an interrupted run costs nothing.
+embedded), so an interrupted run costs nothing. A committed fixture dump
+(`fixtures/seed.sql.gz`, restored automatically on first DB boot) provides
+instant demo data so the quickstart works with zero network calls; the full
+ETL above is the optional enrichment path.
 
 **Data model (all timestamps `timestamptz`, UTC everywhere — authoritative
 clock is the source scene metadata / ingest time, not the browser):**

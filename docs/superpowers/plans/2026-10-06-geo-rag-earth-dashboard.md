@@ -65,7 +65,8 @@ geo-rag-earth-dashboard/
 │   │   ├── routers/{health,auth,search,telemetry,thumbs}.py
 │   │   └── deps.py                           # Task 4  get_settings/get_db/get_encoder
 │   └── tests/
-│       ├── conftest.py                       # Task 1/2 fixture DB + TestClient
+│       ├── conftest.py                       # Task 1/2 fixture DB + TestClient + shared fixtures
+│       ├── helpers.py                        # Task 3 login() helper
 │       ├── test_health.py                    # Task 1
 │       ├── test_auth.py                      # Task 3/4/5
 │       ├── test_search_vector.py             # Task 7
@@ -86,7 +87,10 @@ geo-rag-earth-dashboard/
 │   ├── extract_chips.py                      # Task 12
 │   ├── embed_remoteclip.py                   # Task 13
 │   ├── seed_telemetry.py                     # Task 14
-│   └── tests/{fixtures, test_extract_chips.py}
+│   ├── make_fixture_dump.py                  # Task 14
+│   └── tests/{make_fixture_tif.py, test_extract_chips.py}
+├── fixtures/
+│   └── seed.sql.gz                           # Task 14 (committed; restored by deploy/initdb/02-seed.sh)
 └── docs/
     ├── superpowers/plans/2026-10-06-geo-rag-earth-dashboard.md  # this file
     ├── architecture.mmd                      # Task 24 (+ exported architecture.png)
@@ -133,7 +137,8 @@ os.environ.setdefault("DEMO_USER", "demo")
 os.environ.setdefault("DEMO_PASSWORD", "demo-pass-123")
 os.environ.setdefault("ENCODER", "fake")
 os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
-os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://postgres:postgres@localhost:5432/postgres")
+os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://postgres:postgres@localhost:5432/geo_test")
+# Tests use the dedicated `geo_test` database — NEVER the dev/prod `geo` db.
 
 @pytest.fixture(scope="session")
 def settings():
@@ -151,7 +156,18 @@ def create_client(settings):
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cd apps/api && pip install -r requirements.txt -r requirements-dev.txt && pytest tests/test_health.py -v`
-Expected: FAIL — `ModuleNotFoundError: app` / router not yet present. (Add `pythonpath = ["."]` to `apps/api/pytest.ini` in this step if pytest cannot import `app`.)
+Expected: FAIL — `ModuleNotFoundError: app` / router not yet present.
+
+Create `apps/api/pytest.ini` in this step (registers markers used by later tasks):
+
+```ini
+[pytest]
+pythonpath = .
+markers =
+    db: needs a reachable Postgres (docker compose up -d db)
+    ml: needs ML deps + downloads RemoteCLIP weights
+    smoke: network test against Earth Search STAC
+```
 
 - [ ] **Step 3: Write minimal implementation**
 
@@ -256,7 +272,7 @@ git add -A && git commit -m "feat: repo skeleton, postgis+pgvector db, health en
 
 **Interfaces:**
 - Consumes: Task 1 `Settings.database_url`.
-- Produces: `Base`, `get_db()` dependency yielding `Session`; models `User(uuid, username, password_hash, created_at)`, `RefreshToken(uuid, user_uuid, token_hash, expires_at, used_at, revoked_at)`, `Tile(id, bbox, embedding, thumb_path, captured_at)`, `Telemetry(buoy_id, ts, value, unit)`. Tasks 3–10, 13–14 import these exact names. `embedding` column uses `pgvector.sqlalchemy.Vector(512)`; `bbox` uses `geoalchemy2.Geometry("POLYGON", srid=4326)`.
+- Produces: `Base`, `get_db()` dependency yielding `Session`; models `User(uuid, username, password_hash, created_at)`, `RefreshToken(uuid, user_uuid, token_hash, expires_at, used_at, revoked_at)`, `Tile(id, bbox, embedding, thumb_path, captured_at)`, `Telemetry(buoy_id, ts, value, unit)`. Tasks 3–10, 13–14 import these exact names. `embedding` column uses `pgvector.sqlalchemy.Vector(512)`; `bbox` uses `geoalchemy2.Geometry("POLYGON", srid=4326)`. Also produces `init_db(url: str) -> None` (idempotent create_all + extensions) called from `create_app` lifespan and Task 25.
 
 - [ ] **Step 1: Write failing model test**
 
@@ -272,7 +288,49 @@ def test_tables_create_and_user_roundtrip(engine_session, settings):
     assert got.id == u.id
 ```
 
-`conftest.py` additions: an `engine_session` fixture that creates the engine from `settings.database_url`, `Base.metadata.create_all(engine)`, yields a session, drops all afterward (requires a reachable `docker compose up -d db`; mark `@pytest.mark.db`).
+`conftest.py` additions (requires `docker compose up -d db`; mark tests `@pytest.mark.db`):
+
+```python
+import sqlalchemy as sa
+from sqlalchemy.orm import sessionmaker
+
+@pytest.fixture(scope="session")
+def engine_session(settings):
+    # Ensure the dedicated test database exists (never touch dev `geo`).
+    root = sa.create_engine("postgresql+psycopg://postgres:postgres@localhost:5432/postgres")
+    with root.connect() as conn:
+        conn.execute(sa.text("COMMIT"))
+        conn.execute(sa.text("CREATE DATABASE geo_test"))
+    root.dispose()
+    engine = sa.create_engine(settings.database_url)
+    from app.db import Base
+    import app.models  # register mappers
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    yield Session()
+    Base.metadata.drop_all(engine)
+    engine.dispose()
+```
+
+(`CREATE DATABASE` raises `42P04` if it already exists — catch and pass.)
+
+Also produce `apps/api/app/init_db.py` (used by Task 25 for prod):
+
+```python
+from sqlalchemy import create_engine, text
+from app.db import Base
+import app.models  # noqa: F401
+
+def init_db(url: str) -> None:
+    engine = create_engine(url)
+    with engine.begin() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+    Base.metadata.create_all(engine)
+    engine.dispose()
+```
+
+`create_app` (Task 1) gains a FastAPI `lifespan` hook calling `init_db(settings.database_url)` on startup so a fresh container self-initializes.
 
 - [ ] **Step 2: Run to verify failure**
 
@@ -375,11 +433,38 @@ def test_login_bad_password_401(create_client):
     r = create_client.post("/auth/token", data={"username": "demo", "password": "wrong"})
     assert r.status_code == 401
 
-def test_login_rate_limited(limited_client):           # RATE_LIMIT_ENABLED=true fixture
+def test_login_rate_limited(limited_client):
     for _ in range(5):
         assert limited_client.post("/auth/token", data={"username":"demo","password":"wrong"}).status_code == 401
     r = limited_client.post("/auth/token", data={"username":"demo","password":"wrong"})
     assert r.status_code == 429
+```
+
+Shared helpers — defined here (first consumer), reused by Tasks 4, 7, 9:
+
+```python
+# apps/api/tests/helpers.py
+from fastapi.testclient import TestClient
+
+def login(client: TestClient) -> None:
+    """Log in as the seed user; subsequent requests carry the auth cookies."""
+    r = client.post("/auth/token", data={"username": "demo", "password": "demo-pass-123"})
+    assert r.status_code == 200, r.text
+```
+
+```python
+# apps/api/tests/conftest.py — addition
+import os
+@pytest.fixture()
+def limited_client(settings):
+    """App instance with rate limiting ON (the session default is off)."""
+    os.environ["RATE_LIMIT_ENABLED"] = "true"
+    from app.config import Settings
+    from app.main import create_app
+    s = Settings()
+    with TestClient(create_app(s)) as c:
+        yield c
+    os.environ["RATE_LIMIT_ENABLED"] = "false"
 ```
 
 - [ ] **Step 2: Run to verify failure** — Run: `pytest tests/test_auth.py -v` → FAIL (no `/auth/token`)
@@ -405,8 +490,23 @@ def test_login_rate_limited(limited_client):           # RATE_LIMIT_ENABLED=true
 - Test: `apps/api/tests/test_auth.py` (append)
 
 **Interfaces:**
-- Consumes: Task 3 `create_access_token`, Task 2 `User`.
-- Produces: `verify_jwt(request: Request, settings: Settings, session: Session) -> User` — reads `access_token` cookie, validates HS256 + `exp` + **user exists by `sub` uuid**, else `HTTPException(401)`. All protected routes use `Depends(verify_jwt)`.
+- Consumes: Task 3 `create_access_token`, Task 2 `User`, `helpers.login`.
+- Produces: `verify_jwt` — exact FastAPI dependency signature:
+
+```python
+from fastapi import Depends, HTTPException, Request
+from fastapi.security import OAuth2PasswordBearer  # imported for OpenAPI docs only
+
+def verify_jwt(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+    session: Session = Depends(get_db),
+) -> User:
+    # read `access_token` cookie → jwt.decode(..., settings.jwt_secret, algorithms=["HS256"])
+    # → load User by payload["sub"] as uuid → missing/expired/bad-sig/deleted → HTTPException(401)
+```
+
+All protected routes use `Depends(verify_jwt)`.
 
 - [ ] **Step 1: Write failing tests**
 
@@ -424,6 +524,21 @@ def test_verify_jwt_rejects_deleted_user(create_client, make_token_for_missing_u
     client.cookies.set("access_token", make_token_for_missing_user)  # valid sig, sub not in users
     r = client.get("/telemetry/query")
     assert r.status_code == 401
+```
+
+```python
+# apps/api/tests/conftest.py — addition
+import uuid
+from datetime import datetime, timedelta, timezone
+import jwt as pyjwt
+
+@pytest.fixture()
+def make_token_for_missing_user(settings) -> str:
+    """A correctly signed JWT whose sub points at no users row."""
+    return pyjwt.encode(
+        {"sub": str(uuid.uuid4()), "exp": datetime.now(timezone.utc) + timedelta(minutes=15)},
+        settings.jwt_secret, algorithm="HS256",
+    )
 ```
 
 - [ ] **Step 2: Run to verify failure** — routes currently 404/500 → FAIL
@@ -522,6 +637,34 @@ def test_remoteclip_output_shape():           # @pytest.mark.ml (skipped without
 - [ ] **Step 1: Write failing tests** (fixture DB seeded via `engine_session` with 50 deterministic `FakeEncoder`-encoded tiles; one tile encoded from "turquoise coral reef" to be rank-1 for that query)
 
 ```python
+# apps/api/tests/conftest.py — addition
+import numpy as np
+from shapely.geometry import Polygon, mapping  # or build WKT strings directly
+from app.encoder import FakeEncoder
+
+@pytest.fixture()
+def seeded_tiles(engine_session):
+    """50 tiles with known FakeEncoder embeddings; 'coral' is rank-1 for its own text."""
+    from app.models import Tile
+    enc = FakeEncoder()
+    out = {}
+    for i in range(50):
+        text = "turquoise coral reef" if i == 7 else f"generic coastal patch {i}"
+        poly = Polygon([(35.0 + i * 0.01, 20.0), (35.01 + i * 0.01, 20.0),
+                        (35.01 + i * 0.01, 20.01), (35.0 + i * 0.01, 20.01), (35.0 + i * 0.01, 20.0)])
+        t = Tile(id=uuid.uuid4(), bbox=poly.wkt, embedding=enc.encode_text(text),
+                 thumb_path=f"{uuid.uuid4()}.jpg",
+                 captured_at=datetime(2025, 6, 1, tzinfo=timezone.utc))
+        engine_session.add(t)
+        if i == 7:
+            out["coral"] = t
+    engine_session.commit()
+    return out
+```
+
+(Tests import `login` from `apps.api.tests.helpers`.)
+
+```python
 def test_vector_search_ranked_and_protected(create_client, seeded_tiles):
     assert create_client.post("/search/vector", json={"query": "x"}).status_code == 401
     login(create_client)
@@ -575,6 +718,28 @@ def test_vector_search_ranked_and_protected(create_client, seeded_tiles):
 - [ ] **Step 1: Write failing tests**
 
 ```python
+# apps/api/tests/conftest.py — addition
+from pathlib import Path
+from uuid import uuid4
+import pytest
+
+@pytest.fixture()
+def tmp_thumbs(tmp_path, monkeypatch) -> Path:
+    d = tmp_path / "thumbs"; d.mkdir()
+    monkeypatch.setenv("THUMBS_DIR", str(d))
+    return d
+
+def write_thumb(thumbs_dir: Path, data: bytes) -> str:
+    tid = str(uuid4())
+    (thumbs_dir / f"{tid}.jpg").write_bytes(data)
+    return tid
+```
+
+```python
+# apps/api/tests/test_thumbs.py
+from uuid import uuid4
+from app.tests.helpers import login   # or relative import per package layout
+
 def test_thumb_requires_auth(create_client, tmp_thumbs):
     assert create_client.get(f"/thumbs/{uuid4()}").status_code == 401
 
@@ -600,10 +765,21 @@ def test_thumb_path_traversal_blocked(create_client, tmp_thumbs):
 
 **Interfaces:**
 - Consumes: Task 2 `Telemetry`; Task 4 `verify_jwt`.
-- Produces: `POST /telemetry/ingest` `{"buoy_id": str, "ts": ISO-8601, "value": float, "unit": str}` → 200; duplicate `(buoy_id, ts)` → 200 **no second row**; body > 64 KB → 413. `GET /telemetry/query?buoy_id=&hours=24` → `{"points": [{ts, value}], "count": n}` with `hours` default 24, clamped to max 5,000 points (newest kept). Consumed by Tasks 21 (`TelemetryChart`).
+- Produces: `POST /telemetry/ingest` `{"buoy_id": str (min_length=1), "ts": ISO-8601, "value": float, "unit": str}` → 200; empty `buoy_id` → 422; duplicate `(buoy_id, ts)` → 200 **no second row**; body > 64 KB → 413. `GET /telemetry/query?buoy_id=&hours=24` → `{"points": [{ts, value}], "count": n}` with `hours` default 24, clamped to max 5,000 points (newest kept). Consumed by Tasks 21 (`TelemetryChart`).
 
-- [ ] **Step 1: Write failing tests**: authz 401 (sweep), idempotency (post same payload twice → `count == 1`), window clamp (`hours=100000` → 200, points ≤ 5000), oversize body → 413.
-- [ ] **Step 2: Run → FAIL.** **Step 3: Implement** (`INSERT ... ON CONFLICT DO NOTHING`; FastAPI middleware or nginx-less check via `Content-Length` → 413 at 65536). **Step 4: Run → PASS.** **Step 5:** commit `feat: telemetry query + idempotent ingest with caps"`.
+- [ ] **Step 1: Write failing tests**: authz 401 (sweep), idempotency (post same payload twice → `count == 1`), window clamp (`hours=100000` → 200, points ≤ 5000), oversize body → 413, empty-string `buoy_id` → 422.
+- [ ] **Step 2: Run → FAIL.**
+- [ ] **Step 3: Implement** (`INSERT ... ON CONFLICT DO NOTHING`). The 413 cap is **one global middleware** (decided — not a per-route check):
+
+```python
+@app.middleware("http")
+async def body_size_limit(request: Request, call_next):
+    if int(request.headers.get("content-length", 0)) > 65536:
+        return JSONResponse({"detail": "payload too large"}, status_code=413)
+    return await call_next(request)
+```
+
+- [ ] **Step 4: Run → PASS.** **Step 5:** commit `feat: telemetry query + idempotent ingest with caps"`.
 
 *API milestone checkpoint (M3):* `docker compose up` + full `pytest -v` green; manual smoke: `curl -c jar -X POST -d 'username=demo&password=demo-pass-123' localhost:8000/auth/token` then `curl -b jar localhost:8000/search/vector -H 'content-type: application/json' -d '{"query":"water"}'`.
 
@@ -644,12 +820,12 @@ def test_one_scene_downloads(tmp_path):
 ### Task 12: Chip extractor (golden-file test)
 
 **Files:**
-- Create: `etl/extract_chips.py`, `etl/tests/test_extract_chips.py`, `etl/tests/fixtures/scene_mini.tif` (tiny synthetic GeoTIFF built in test setup, committed as generator script if binary unwanted)
+- Create: `etl/extract_chips.py`, `etl/tests/test_extract_chips.py`, `etl/tests/make_fixture_tif.py` (generator script — **decided: no binary GeoTIFFs in git**; tests call the generator into `tmp_path`)
 - Modify: `etl/requirements.txt` (+`rasterio`, `numpy`)
 
 **Interfaces:**
 - Consumes: Task 11 manifest + TIFFs.
-- Produces: `extract_chips(scene_dir: Path, out_dir: Path, chip_size=512, stride=128) -> list[ChipRecord]` where `ChipRecord = {chip_id: uuid5(scene_id+row+col), chip_path, bbox: (w,s,e,n), scene_datetime}`; writes `{out_dir}/{chip_id}.jpg` (RGB preview) + `{chip_id}.npy` (4-band float array) and `chips_manifest.jsonl`. Task 13 reads this.
+- Produces: `extract_chips(scene_dir: Path, out_dir: Path | None = None, chip_size=512, stride=128) -> list[ChipRecord]` where `ChipRecord = {chip_id: uuid5(scene_id+row+col), chip_path, bbox: (w,s,e,n), scene_datetime}`; `out_dir` **defaults to `data/thumbs` — the same directory `Settings.thumbs_dir` serves from** (Task 9); writes `{out_dir}/{chip_id}.jpg` (RGB preview) + `{chip_id}.npy` (4-band float array, sibling cache dir) and `chips_manifest.jsonl`. Task 13 reads this. **Missing band in a scene → scene skipped with a WARNING log line** (spec §7), never a crash.
 
 - [ ] **Step 1: Write failing golden test**: build 1024×1024 synthetic GeoTIFF with known transform in-test → extract with chip_size=512, stride=512 → expect 4 chips; assert chip 0 bbox ≈ transform-derived corners within 1e-6; assert deterministic `chip_id` stable across runs.
 - [ ] **Step 2: Run → FAIL.** **Step 3: Implement** with `rasterio.windows.Window` + `rasterio.windows.transform`. **Step 4: Run → PASS.** **Step 5:** commit `feat: 512px chip extractor with georeferenced golden test"`.
@@ -664,7 +840,7 @@ def test_one_scene_downloads(tmp_path):
 
 **Interfaces:**
 - Consumes: Task 12 `chips_manifest.jsonl`; Task 2 models (run against compose `db`); Task 6's `RemoteCLIPEncoder` (import from `apps/api` via `sys.path` insert or shared package — **decision: `etl/` inserts `apps/api` on `sys.path` and reuses `app.encoder`, single source of truth**).
-- Produces: `python etl/embed_remoteclip.py --manifest path --batch 16` → idempotent upsert: `INSERT ... ON CONFLICT (id) DO UPDATE`; skips chips whose embedding is already non-null unless `--force`; prints progress `embedded N/M` and final count to `tiles`.
+- Produces: `python etl/embed_remoteclip.py --manifest path --batch 16` → idempotent upsert: `INSERT ... ON CONFLICT (id) DO UPDATE`; skips chips whose embedding is already non-null unless `--force`; prints progress `embedded N/M` and final count to `tiles`. **`thumb_path` stores only the relative filename** (`{chip_id}.jpg`), resolved against `Settings.thumbs_dir` at serve time — never an absolute path.
 
 - [ ] **Step 1: Write failing test**: seed 3 fake chip `.npy` files + manifest → run embed with `ENCODER=fake` (tests never download the model) → assert 3 rows in `tiles`, embeddings L2-normalized, re-run inserts nothing new (idempotent).
 - [ ] **Step 2: Run → FAIL.** **Step 3: Implement** (batch loop, `ON CONFLICT DO NOTHING` on first pass check). **Step 4: Run → PASS**; locally once with real encoder: run against 10 chips, assert `pgv_dim(embedding)=512`.
@@ -672,17 +848,22 @@ def test_one_scene_downloads(tmp_path):
 
 ---
 
-### Task 14: Telemetry seeder
+### Task 14: Telemetry seeder + committed fixture dump
 
 **Files:**
-- Create: `etl/seed_telemetry.py`
+- Create: `etl/seed_telemetry.py`, `etl/make_fixture_dump.py`, `fixtures/seed.sql.gz`, `deploy/initdb/02-seed.sh`
 
 **Interfaces:**
 - Consumes: compose `db`.
-- Produces: `python etl/seed_telemetry.py --buoys 5 --days 7 --freq 10min` → 5 buoy ids `buoy-rs-1..5`, sinusoid + seeded noise, `ON CONFLICT DO NOTHING`; total ≈ 5040 rows (≤ query cap across default window: 24 h × 6/h × 5 = 720 points — under 5,000 ✓).
+- Produces:
+  1. `python etl/seed_telemetry.py --buoys 5 --days 7 --freq 10min` → buoy ids `buoy-rs-1..5`, sinusoid + seeded noise, `ON CONFLICT DO NOTHING`; total ≈ 5040 rows (24 h default window keeps the query under the 5,000-point cap ✓).
+  2. `python etl/make_fixture_dump.py --tiles 100` → runs the *chip + embed path* on 100 small real chips (or on-the-fly RemoteCLIP over a 10-chip mini set expanded with seeded jitter if a full ETL hasn't run), then `pg_dump --data-only --table=tiles --table=telemetry` → `fixtures/seed.sql.gz` (**committed to the repo**, ~1–3 MB).
+  3. `deploy/initdb/02-seed.sh` (mounted via the existing `initdb` volume): `gunzip -c /fixtures/seed.sql.gz | psql -U postgres -d geo` — so a fresh `docker compose up` is search-ready with **zero network calls**.
 
-- [ ] **Step 1:** failing test — run seeder twice against test DB → row count unchanged; all `ts` are UTC (`ts.tzinfo is not None`).
-- [ ] **Step 2: Run → FAIL.** **Step 3: Implement.** **Step 4: Run → PASS.** **Step 5:** commit `feat: deterministic synthetic buoy telemetry seeder"`.
+This dump is what makes spec success criterion 4 ("clone → search in under 10 minutes") and the offline CI e2e (Task 22) true. The full ETL (Tasks 11–13) remains the optional path for regenerating/enriching data.
+
+- [ ] **Step 1:** failing test — run seeder twice against test DB → row count unchanged; all `ts` are UTC (`ts.tzinfo is not None`); fixture dump restore test: load `seed.sql.gz` into a scratch DB → `SELECT count(*) FROM tiles` = 100.
+- [ ] **Step 2: Run → FAIL.** **Step 3: Implement** all three artifacts. **Step 4: Run → PASS**; verify `docker compose down -v && docker compose up -d` then `POST /search/vector {"query":"water"}` returns ≤ 12 results with no ETL run. **Step 5:** commit `feat: telemetry seeder and committed fixture seed dump"`.
 
 *Milestone checkpoint (M2):* fresh `docker compose down -v && up` → run Tasks 11→14 in order → `SELECT count(*) FROM tiles;` > 500, `SELECT count(*) FROM telemetry;` ≈ 5040.
 
@@ -715,7 +896,40 @@ def test_one_scene_downloads(tmp_path):
     depends_on: [api]
 ```
 
-(Thin `Dockerfile`s: api FROM python:3.12-slim installing both requirements files; web FROM node:22-slim, `npm ci && npm run build`.)
+Dockerfiles (full content):
+
+```dockerfile
+# apps/api/Dockerfile
+FROM python:3.12-slim
+WORKDIR /srv
+COPY requirements.txt requirements-ml.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-ml.txt
+COPY app ./app
+EXPOSE 8000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+```dockerfile
+# apps/web/Dockerfile
+FROM node:22-slim AS build
+WORKDIR /srv
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM node:22-slim
+WORKDIR /srv
+ENV NODE_ENV=production
+COPY --from=build /srv/.next ./.next
+COPY --from=build /srv/node_modules ./node_modules
+COPY --from=build /srv/package.json ./
+COPY --from=build /srv/public ./public
+EXPOSE 3000
+CMD ["npm", "start"]
+```
+
+(`app.main:app` implies the module-level `app = create_app(Settings())` entrypoint that uvicorn and tests share; `create_app` stays the injectable factory.)
 
 - [ ] **Step 4: Run → PASS**; `docker compose up` → `curl localhost:3000` contains headline; `curl localhost:3000/api/health` → `{"status":"ok"}`.
 - [ ] **Step 5:** commit `feat: Next.js scaffold with landing page and api proxy"`.
@@ -731,7 +945,7 @@ def test_one_scene_downloads(tmp_path):
 - Consumes: Task 15 `apiFetch`; Task 3/5 cookie endpoints.
 - Produces: `/login` form (username/password) → `POST /api/auth/token` (`Content-Type: application/x-www-form-urlencoded`) → `router.push("/dashboard")`; on 401 show inline error "Invalid credentials". `AuthGuard` wraps dashboard: on mount `GET /api/health`-independent check via a lightweight `GET /api/auth/me` (**add `GET /auth/me` → `{username}` to Task 3's router, protected by `verify_jwt` — one new route, 401 otherwise**); if 401 → `redirect("/login")`. `lib/auth.ts` exports `logout()` → `POST /api/auth/refresh`-style clear: `POST /api/auth/logout` (**add to Task 3 router: clears both cookies, revokes refresh row**).
 
-- [ ] **Step 1: failing tests**: login page submits and pushes `/dashboard` on 200 (mock `fetch`); on 401 shows error text; `AuthGuard` redirects to `/login` when `/auth/me` 401.
+- [ ] **Step 1: failing tests**: login page submits and pushes `/dashboard` on 200 (mock `fetch`); on 401 shows error text; `AuthGuard` redirects to `/login` when `/auth/me` 401. **Also extend Task 4's authz sweep list** with the two new routes: `GET /auth/me` and `POST /auth/logout` must both 401 when anonymous.
 - [ ] **Step 2: Run → FAIL.** **Step 3: Implement** (client components; `"use client"` directives). **Step 4: Run → PASS** + curl round-trip through the proxy. **Step 5:** commit `feat: login flow and dashboard auth guard"`.
 
 ---
@@ -822,7 +1036,7 @@ def test_one_scene_downloads(tmp_path):
 
 - [ ] **Step 1: failing e2e** — write spec as above with `page.goto("/login")`.
 - [ ] **Step 2: Run → FAIL** — `npx playwright test`.
-- [ ] **Step 3: green locally** — `docker compose up -d && npx playwright test` after M2 seed + M3/M4 done.
+- [ ] **Step 3: green locally** — `docker compose down -v && docker compose up -d && npx playwright test`. **Decided: e2e runs against the committed fixture dump from Task 14** (no network, no full ETL) so CI is deterministic and fast; the full ETL is never a CI dependency.
 - [ ] **Step 4: CI file** with the three jobs; push; verify Actions green.
 - [ ] **Step 5:** commit `test: playwright e2e and GitHub Actions CI"`.
 
@@ -846,7 +1060,7 @@ def test_one_scene_downloads(tmp_path):
 **Files:**
 - Create: `README.md`, `docs/demo.gif` (Playwright video → ffmpeg), `apps/web/e2e/recording.spec.ts`
 
-**README sections (content, not placeholders):** headline + badges (CI); architecture image; 3-command quickstart (`git clone … && cp .env.example .env && docker compose up`); demo credentials line `demo` / value of `DEMO_PASSWORD` (dev default `demo-pass-123`); ETL rerun instructions; security notes (JWT flow summary + 401 example); benchmark table link.
+**README sections (content, not placeholders):** headline + badges (CI); architecture image; 3-command quickstart (`git clone … && cp .env.example .env && docker compose up` — **works offline thanks to the Task 14 fixture dump auto-restore**); demo credentials line `demo` / value of `DEMO_PASSWORD` (dev default `demo-pass-123`); ETL rerun instructions (optional data enrichment); security notes (JWT flow summary + 401 example); benchmark table link.
 
 - [ ] **Step 1:** record e2e with `video: "on"` → `ffmpeg -i video.webm -vf "fps=10,scale=800:-1" docs/demo.gif`.
 - [ ] **Step 2:** write README per sections; verify quickstart on a clean clone in a temp dir (`docker compose up` from scratch, ≤10 min, no manual steps).
@@ -866,7 +1080,7 @@ def test_one_scene_downloads(tmp_path):
 
 - [ ] **Step 1: DNS** — run `deploy/cloudflare-dns.sh`; `dig +short geo.sumbono.dev` → machine IP.
 - [ ] **Step 2: Deploy** — run `deploy/coolify-deploy.sh`; Traefik issues LE cert (watch `docker logs coolify-proxy`).
-- [ ] **Step 3: Seed prod** — run `etl/` tasks 11→14 against prod DB (or `pg_dump` local → restore).
+- [ ] **Step 3: Seed prod** — tables self-create via `init_db` in the api lifespan (Task 2); then restore the Task 14 fixture dump (`fixtures/seed.sql.gz`) for instant data, optionally followed by the full ETL (Tasks 11→13) for richer coverage.
 - [ ] **Step 4: Live verification (the acceptance test for the whole spec §1 success criteria):**
 
 ```bash
@@ -884,9 +1098,10 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST https://geo.sumbono.dev/api/sea
 
 ---
 
-## Self-Review (executed by plan author)
+## Self-Review (executed by plan author; re-run after triple-pass revision)
 
-1. **Spec coverage:** §1 success → Tasks 24–25 (+22 CI); §2 decisions → reflected in Global Constraints; §3 layout → File Structure; §4 topology → Tasks 1/15/25; §5 data flow → Tasks 11–14 (Phase A), 6–10 (Phase B), latency budget → Task 23; §6 security → Tasks 3–5, 9, 16, 24; §7 error handling → Review Focus + tests in Tasks 5/9/10/11/18; §8 testing → every task TDD + Task 22; §9 deployment → Task 25; §10 milestones → task map; §11 risks → Task 11 (S3 pays), Task 23 (latency honesty), Task 25 (DNS), Review Focus. **No gaps found.**
-2. **Placeholder scan:** no TBD/TODO/"handle edge cases"/"similar to Task N"; every code step carries code or an exact spec-defined column list.
-3. **Type consistency:** `SearchResult` fields identical across Tasks 7/8/15/17/18/19/20; cookie names `access_token`/`refresh_token` across Tasks 3/5/16; `verify_jwt` single definition (Task 4) consumed by 7–10; `RemoteCLIPEncoder` reused by Task 13 via `sys.path` (explicitly decided); `create_app(settings)` stable from Task 1.
+1. **Spec coverage:** §1 success → Tasks 24–25 (+22 CI, +14 fixture dump for the <10-min quickstart); §2 decisions → Global Constraints; §3 layout → File Structure; §4 topology → Tasks 1/15/25; §5 data flow → Tasks 11–14 (Phase A), 6–10 (Phase B), latency budget → Task 23; §6 security → Tasks 3–5, 9, 16, 24; §7 error handling → Review Focus + tests in Tasks 5/9/10/11/12/18; §8 testing → every task TDD + Task 22; §9 deployment → Task 25; §10 milestones → task map; §11 risks → Task 11 (S3 pays), Task 23 (latency honesty), Task 25 (DNS), Review Focus. **No gaps found.**
+2. **Placeholder scan:** no TBD/TODO/"handle edge cases"/"similar to Task N"; every test helper referenced in code is defined in its first-consumer task (`login`, `limited_client`, `make_token_for_missing_user`, `seeded_tiles`, `tmp_thumbs`, `write_thumb`); no unresolved "X or Y" choices remain (413 middleware, fixture generator, thumb dir, fixture dump all decided).
+3. **Type consistency:** `SearchResult` fields identical across Tasks 7/8/15/17/18/19/20; cookie names `access_token`/`refresh_token` across Tasks 3/5/16; `verify_jwt` single definition (Task 4) consumed by 7–10; `RemoteCLIPEncoder` reused by Task 13 via `sys.path` (explicitly decided); `create_app(settings)` + module-level `app` entrypoint stable from Task 1; `thumb_path` = relative filename consistently (Task 13 write ↔ Task 9 serve).
 4. **Review Focus:** all five lines each have a pinning test: #1→Task 11 Step 1, #2→Task 5 Step 1, #3→Task 4 Step 1, #4→Task 6 Step 1 + Task 7 dim assert, #5→Task 9 Step 1.
+5. **Triple-pass (plan-level) findings applied:** `geo_test` isolation (no clobbering dev data), fixture dump (quickstart + offline CI), `init_db` ownership (prod tables), empty-`buoy_id` 422, missing-band scene skip, pytest marker registration, authz sweep extension for `/auth/me` + `/auth/logout`, full Dockerfile content.
