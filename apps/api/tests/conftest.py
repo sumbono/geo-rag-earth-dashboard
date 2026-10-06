@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 import sqlalchemy as sa
 from sqlalchemy.orm import sessionmaker
 
-os.environ.setdefault("JWT_SECRET", "test-jwt-secret")
+os.environ.setdefault("JWT_SECRET", "test-jwt-secret-0123456789abcdef0123456789")  # >=32 bytes: PyJWT warns on short HMAC keys
 os.environ.setdefault("REFRESH_SECRET", "test-refresh-secret")
 os.environ.setdefault("DEMO_USER", "demo")
 os.environ.setdefault("DEMO_PASSWORD", "demo-pass-123")
@@ -24,6 +24,17 @@ def create_client(settings):
     app = create_app(settings)
     with TestClient(app) as c:
         yield c
+
+@pytest.fixture()
+def limited_client(settings):
+    """App instance with rate limiting ON (the session default is off)."""
+    os.environ["RATE_LIMIT_ENABLED"] = "true"
+    from app.config import Settings
+    from app.main import create_app
+    s = Settings()
+    with TestClient(create_app(s)) as c:
+        yield c
+    os.environ["RATE_LIMIT_ENABLED"] = "false"
 
 def _create_geo_test() -> None:
     """Create the dedicated test database (never touch dev `geo`).

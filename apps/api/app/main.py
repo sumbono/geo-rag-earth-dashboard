@@ -2,7 +2,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from app.config import Settings
 from app.init_db import init_db
-from app.routers import health
+from app.rate_limit import install_rate_limit
+from app.routers import auth, health
 
 def create_app(settings: Settings) -> FastAPI:
     @asynccontextmanager
@@ -12,5 +13,7 @@ def create_app(settings: Settings) -> FastAPI:
 
     app = FastAPI(title="Geo-RAG Earth Dashboard API", lifespan=lifespan)
     app.state.settings = settings
+    install_rate_limit(app, settings)
     app.include_router(health.router)
+    app.include_router(auth.router)
     return app

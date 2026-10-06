@@ -5,3 +5,7 @@ sqlalchemy
 geoalchemy2
 pgvector
 psycopg[binary]
+bcrypt
+PyJWT
+slowapi
+python-multipart
