@@ -38,10 +38,10 @@ ingestion, full-resolution imagery storage, multi-region coverage, mobile app.
 | # | Decision | Choice | Rationale |
 |---|---|---|---|
 | D1 | Architecture | **Approach 1**: Next.js + FastAPI + offline ETL, one compose stack | Showcases both stacks (Python backend + TypeScript/React frontend) |
-| D2 | Map stack | **MapLibre GL + ESRI World Imagery raster** (default, no API key, attribution shown) + OSM streets toggle | No account/token; repo self-contained for recruiters; satellite basemap fits the domain (MapLibre demo tiles have no imagery) |
+| D2 | Map stack | **MapLibre GL + ESRI World Imagery raster** (default, no API key, attribution shown) + OSM streets toggle | No account/token; repo self-contained for anyone cloning it; satellite basemap fits the domain (MapLibre demo tiles have no imagery) |
 | D3 | Auth | **Visible login page**: public `/` + `/login`, JWT-gated `/dashboard` and all data APIs; demo creds in README | Security must be *seeable*; avoids bounce at a hard wall |
 | D4 | Data scope | Saudi Red Sea coast, 512px RGB+NIR chips, low-thousands of rows | CPU-precomputable on this machine; honest, bounded |
-| D5 | Message queue | **None** — telemetry via API → Postgres | Resume already proves Kafka; adding it here is ops weight without new signal |
+| D5 | Message queue | **None** — telemetry via API → Postgres | Kafka is already proven in production work elsewhere; adding it here is ops weight without new signal |
 | D6 | Deployment | Coolify stack on this machine, host `geo.sumbono.dev` | Reuses existing Traefik/Let's Encrypt; matches "You Build It You Run It" |
 | D7 | Credentials | Cloudflare: `/home/bono/documents/cloudflare.txt` · Coolify API: `/home/bono/documents/coolify-api-token.txt` | Located 2026-10-06; never committed to repo; `.env.example` only |
 | D8 | Imagery source | **Element84 Earth Search STAC API v1** (`earth-search.aws.element84.com/v1`, collection `sentinel-2-l2a`) | Verified live 2026-10-06: no auth, no requester-pays marker; Copernicus bulk API needs registration and lost |
@@ -53,11 +53,11 @@ ingestion, full-resolution imagery storage, multi-region coverage, mobile app.
 |---|---|
 | Next.js full-stack (API routes only) | Hides the stronger story here (Python/FastAPI backend); ETL needs Python anyway → two runtimes regardless |
 | FastAPI + vanilla-JS map frontend | Misses the modern TypeScript/React frontend this project exists to demonstrate |
-| Mapbox GL JS | Requires account + token; repo not self-contained for recruiters running it locally |
+| Mapbox GL JS | Requires account + token; repo not self-contained for anyone running it locally |
 | Leaflet + OSM raster | Lighter, but reads dated for a "modern frontend" showcase |
 | MapLibre demo tiles | No satellite imagery — unusable for an Earth-observation app |
 | Copernicus Data Space download API | Requires account registration; breaks the 3-command quickstart spirit |
-| Kafka/Redis/Celery in the stack | Resume already proves them; ops weight with no new signal (telemetry is a seeded demo) |
+| Kafka/Redis/Celery in the stack | Already proven in production work elsewhere; ops weight with no new signal (telemetry is a seeded demo) |
 | Real instrument ingestion | Out of scope; simulated telemetry suffices for the domain story |
 
 **Machine facts (verified):** Coolify 4.3.23 healthy; Traefik v3 on 80/443 with
@@ -157,7 +157,7 @@ clock is the source scene metadata / ingest time, not the browser):**
 | `tiles` | `uuid` | bbox (Polygon, PostGIS SRID 4326), embedding (vector, 512), thumb_path, captured_at (from scene metadata) | uuid v4 |
 | `telemetry` | `(buoy_id text, ts timestamptz)` | value double, unit text; **no tokens/secrets ever stored** | composite natural key (idempotent ingest) |
 
-**Phase B — Query-time (what a recruiter sees):**
+**Phase B — Query-time (what a user sees):**
 
 1. Login at `/login` → `POST /auth/token` → JWT cookie set.
 2. On `/dashboard`, type: *"coral reef turquoise water near coastline"*.
