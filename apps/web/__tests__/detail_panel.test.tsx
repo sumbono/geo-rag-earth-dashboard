@@ -241,6 +241,24 @@ describe("empty state", () => {
       query: "cloud patterns",
     });
   });
+
+  it("puts the clicked suggestion into the search input", async () => {
+    stubFetch(200, { results: [] });
+    render(<DashboardPage />);
+
+    submitQuery("water");
+    const suggestion = await screen.findByRole("button", {
+      name: "turquoise coastal water",
+    });
+    fireEvent.click(suggestion);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    // The input reflects the active query, so a follow-up manual submit
+    // re-runs what the user just saw — not the previous stale text.
+    expect(screen.getByLabelText("Search")).toHaveValue(
+      "turquoise coastal water",
+    );
+  });
 });
 
 describe("dashboard wiring", () => {

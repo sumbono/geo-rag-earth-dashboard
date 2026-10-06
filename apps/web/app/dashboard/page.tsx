@@ -18,6 +18,7 @@ import type { SearchResult } from "../../lib/types";
 export default function DashboardPage() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
   const [searched, setSearched] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,10 +44,11 @@ export default function DashboardPage() {
   }
 
   /** EmptyState suggestion → same single POST as a manual search. */
-  async function handleSuggest(query: string) {
+  async function handleSuggest(suggested: string) {
+    setQuery(suggested);
     handleSearchStart();
     try {
-      handleResults(await searchVector(query));
+      handleResults(await searchVector(suggested));
     } catch (err) {
       handleError(err);
     }
@@ -63,6 +65,8 @@ export default function DashboardPage() {
       style={{ display: "flex", flexDirection: "column", gap: 12, padding: 16 }}
     >
       <SearchBar
+        query={query}
+        onQueryChange={setQuery}
         onSearchStart={handleSearchStart}
         onResults={handleResults}
         onError={handleError}
