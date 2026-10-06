@@ -17,6 +17,8 @@ os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
 os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://postgres:postgres@localhost:5432/geo_test")
 # Tests use the dedicated `geo_test` database — NEVER the dev/prod `geo` db.
 
+from app.encoder import FakeEncoder  # noqa: E402  (after env defaults, like every app import here)
+
 @pytest.fixture(scope="session")
 def settings():
     from app.config import Settings
@@ -100,3 +102,24 @@ def engine_session(settings):
     session.close()
     Base.metadata.drop_all(engine)
     engine.dispose()
+
+@pytest.fixture()
+def seeded_tiles(engine_session):
+    """50 tiles with known FakeEncoder embeddings; 'coral' is rank-1 for its own text."""
+    from app.models import Tile
+    enc = FakeEncoder()
+    out = {}
+    for i in range(50):
+        text = "turquoise coral reef" if i == 7 else f"generic coastal patch {i}"
+        # WKT built directly (brief's sanctioned alternative to shapely, which
+        # is not a dependency of this repo).
+        x0, x1 = 35.0 + i * 0.01, 35.01 + i * 0.01
+        wkt = f"POLYGON(({x0} 20.0, {x1} 20.0, {x1} 20.01, {x0} 20.01, {x0} 20.0))"
+        t = Tile(id=uuid.uuid4(), bbox=wkt, embedding=enc.encode_text(text),
+                 thumb_path=f"{uuid.uuid4()}.jpg",
+                 captured_at=datetime(2025, 6, 1, tzinfo=timezone.utc))
+        engine_session.add(t)
+        if i == 7:
+            out["coral"] = t
+    engine_session.commit()
+    return out
