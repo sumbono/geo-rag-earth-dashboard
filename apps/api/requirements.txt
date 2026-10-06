@@ -9,3 +9,4 @@ bcrypt
 PyJWT
 slowapi
 python-multipart
+numpy
