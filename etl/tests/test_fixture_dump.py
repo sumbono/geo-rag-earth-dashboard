@@ -31,6 +31,7 @@ Run from ``etl/``::
 import gzip
 import json
 import os
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -106,6 +107,24 @@ def _dump_manifest() -> dict:
     return json.loads(SEED_MANIFEST.read_text(encoding="utf-8"))
 
 
+def _run_seed_script(env: dict, timeout: int = 120) -> subprocess.CompletedProcess:
+    """Run the committed 02-seed.sh inside the db container with env overrides.
+
+    The script runs where psql/gunzip live (neither exists on the host here),
+    exactly as the postgres entrypoint would — just with SEED_DB / SEED_SQL /
+    SEED_SKIP injected for the scenario under test.
+    """
+    exports = " ".join(f"{key}={shlex.quote(val)}" for key, val in env.items())
+    cmd = [
+        "sudo", "-n", "docker", "compose",
+        "-f", str(REPO_ROOT / "docker-compose.yml"),
+        "exec", "-T", "db",
+        "sh", "-c",
+        f"{exports} sh /docker-entrypoint-initdb.d/02-seed.sh",
+    ]
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
+
 @pytest.mark.db
 def test_seed_dump_gzip_and_manifest_sanity():
     """Dump is a real gzip under the commit gate; manifest counts pass R3."""
@@ -140,7 +159,18 @@ def test_initdb_script_restores_into_scratch_db():
         "*.sh files and sources non-executable ones (a sourced `exit` would "
         "kill the entrypoint)"
     )
-    assert INITDB_SCRIPT.read_text(encoding="utf-8").count("gunzip -c") == 1
+    # Exactly one real restore pipe (comment mentions excluded — the header
+    # documents the gunzip-failure class this line is the guard for).
+    restore_lines = [
+        line
+        for line in INITDB_SCRIPT.read_text(encoding="utf-8").splitlines()
+        if "gunzip -c" in line and not line.lstrip().startswith("#")
+    ]
+    assert len(restore_lines) == 1, restore_lines
+    assert "gunzip -t" in INITDB_SCRIPT.read_text(encoding="utf-8"), (
+        "corrupt-dump gate missing — POSIX sh has no pipefail, so the "
+        "`gunzip -c | psql` pipe must be preceded by gunzip -t"
+    )
 
     # Scratch database, no schema — stands in for a fresh pgdata volume.
     admin = sa.create_engine(ADMIN_URL, isolation_level="AUTOCOMMIT")
@@ -154,14 +184,7 @@ def test_initdb_script_restores_into_scratch_db():
         # no host client in this environment). SEED_DB overrides the target —
         # everything else is the real initdb path, including the fixtures
         # bind mount at /fixtures.
-        cmd = [
-            "sudo", "-n", "docker", "compose",
-            "-f", str(REPO_ROOT / "docker-compose.yml"),
-            "exec", "-T", "db",
-            "sh", "-c",
-            f"SEED_DB={SCRATCH_DB} sh /docker-entrypoint-initdb.d/02-seed.sh",
-        ]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        proc = _run_seed_script({"SEED_DB": SCRATCH_DB})
         assert proc.returncode == 0, (
             f"02-seed.sh failed rc={proc.returncode}\n"
             f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
@@ -195,3 +218,49 @@ def test_initdb_script_restores_into_scratch_db():
                 sa.text(f"DROP DATABASE IF EXISTS {SCRATCH_DB} WITH (FORCE)")
             )
         admin.dispose()
+
+
+@pytest.mark.db
+def test_initdb_script_rejects_corrupt_dump():
+    """Review Important: a non-gzip SEED_SQL must exit non-zero with a clear
+    ERROR naming the file — never the success line.
+
+    POSIX sh has no `pipefail`, so `gunzip -c | psql` alone would let a
+    failed gunzip feed psql empty stdin (psql exits 0) and print
+    "restored ... into geo" over an empty, unsearchable DB — a silent
+    failure of spec criterion 4 announcing success.  The committed script's
+    `gunzip -t` gate must fire first.  ``01-extensions.sql`` (mounted,
+    text, definitely not gzip) stands in for a git-lfs pointer or a
+    truncated checkout.
+    """
+    corrupt = "/docker-entrypoint-initdb.d/01-extensions.sql"
+    proc = _run_seed_script({"SEED_SQL": corrupt})
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, (
+        f"corrupt dump must fail hard, got rc=0:\n{out}"
+    )
+    assert "ERROR" in out, f"no clear ERROR line:\n{out}"
+    assert corrupt in out, "the ERROR must name the offending file"
+    assert "not a valid gzip" in out, f"gate message missing:\n{out}"
+    assert "restored" not in out, "success line must never print on failure"
+
+
+@pytest.mark.db
+def test_initdb_script_missing_dump_fails_hard_unless_skipped():
+    """Review Minor: absent dump → exit 1 + ERROR (no silent unseeded boot);
+    exit 0 only under the explicit SEED_SKIP=1 override."""
+    missing = "/fixtures/no-such-dump.sql.gz"
+
+    proc = _run_seed_script({"SEED_SQL": missing})
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, f"missing dump must fail hard, got rc=0:\n{out}"
+    assert "ERROR" in out and missing in out, f"ERROR must name the file:\n{out}"
+    assert "restored" not in out
+
+    skipped = _run_seed_script({"SEED_SQL": missing, "SEED_SKIP": "1"})
+    skipped_out = skipped.stdout + skipped.stderr
+    assert skipped.returncode == 0, (
+        f"SEED_SKIP=1 must skip with exit 0:\n{skipped_out}"
+    )
+    assert "skipping" in skipped_out
+    assert "restored" not in skipped_out
