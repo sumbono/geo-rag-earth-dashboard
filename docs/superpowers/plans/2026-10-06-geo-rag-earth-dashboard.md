@@ -795,10 +795,20 @@ async def body_size_limit(request: Request, call_next):
 - Consumes: Earth Search STAC v1 (`https://earth-search.aws.element84.com/v1`), collection `sentinel-2-l2a`.
 - Produces: CLI `python etl/download_sentinel2.py --bbox 34.5 16.5 40.0 29.0 --max-scenes 40 --cloud-cover 20` → scenes saved under `ETL_CACHE_DIR/{scene_id}/` (B04, B08, B03, B02 TIFFs + `scene.json` manifest incl. bbox + datetime); returns exit 0 and writes `ETL_CACHE_DIR/manifest.json` listing downloaded scenes. Task 12 reads this manifest.
 
-- [ ] **Step 1: Write failing smoke test**
+- [ ] **Step 1: Write failing smoke test** (plus a deterministic unit test of the asset-URL policy — no network):
 
 ```python
 import os, pytest
+
+def test_pick_asset_prefers_https_over_s3():
+    """Requester-pays lives on the S3 layer — HTTPS must win when both exist."""
+    from download_sentinel2 import pick_asset_href
+    assets = {
+        "B04": {"href": "s3://sentinel-s2-l2a/x/B04.tif"},
+        "B04_https": {"href": "https://sentinel-c1.example/x/B04.tif"},
+    }
+    assert pick_asset_href("B04", assets).startswith("https://")
+    assert pick_asset_href("B04", {"B04": assets["B04"]}).startswith("s3://")  # s3 only when alone
 
 @pytest.mark.smoke
 def test_one_scene_downloads(tmp_path):
@@ -811,7 +821,12 @@ def test_one_scene_downloads(tmp_path):
 ```
 
 - [ ] **Step 2: Run to verify failure** — `cd etl && pip install -r requirements.txt && pytest tests/test_download.py -v -m smoke` → FAIL (module missing). *This is the task that catches the spec's #1 open risk — if the S3 layer demands payment/auth, this test fails here, before any other ETL work.*
-- [ ] **Step 3: Implement** with `pystac-client` + `requests` streaming; on `AccessDenied`/403 raise a clear error naming the fallback (pre-seeded chip dump) per spec §11.
+- [ ] **Step 3: Implement** with `pystac-client` + `requests` streaming. **Asset-URL policy (prevention for the requester-pays risk):** for each STAC item, pick asset hrefs in this order — (1) `https://` hrefs (including `alternate.https` when the item uses the alternate-assets extension), (2) `s3://` only as last resort. If a fetch returns 403/`AccessDenied`, apply the **fallback ladder** in order, logging each switch:
+  1. Retry remaining assets of the same scene over HTTPS if the first hit was `s3://`.
+  2. Switch the catalog client to **Microsoft Planetary Computer** (`https://planetarycomputer.microsoft.com/api/stac/v1`, same `sentinel-2-l2a` collection; sign asset URLs via the public `planetarycomputer.microsoft.com/api/sas/v1/sign` endpoint — no account). The STAC-query/fetch interface is unchanged; only the catalog base URL + signing step differ.
+  3. If both catalogs fail: run in degraded mode — skip downloads, leave the fixture dump as the demo data source, and record in `ETL_CACHE_DIR/manifest.json` that coverage is fixture-only (spec §7 honesty requirement). Never crash the demo path.
+
+  On any unrecoverable fetch error, raise a clear message naming the ladder outcome — never a bare traceback.
 - [ ] **Step 4: Run to verify pass** → PASS (network test; CI marks `smoke` as allowed-failure-with-annotation only if flaky — local run is authoritative).
 - [ ] **Step 5:** commit `feat: Earth Search STAC scene downloader with one-scene smoke test"`.
 
