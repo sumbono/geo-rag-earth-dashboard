@@ -16,6 +16,13 @@ def test_login_bad_password_401(create_client):
 
 
 @pytest.mark.db
+def test_login_unknown_user_401(create_client):
+    r = create_client.post("/auth/token", data={"username": "ghost", "password": "whatever"})
+    assert r.status_code == 401
+    assert r.json() == {"detail": "Incorrect username or password"}
+
+
+@pytest.mark.db
 def test_login_rate_limited(limited_client):
     for _ in range(5):
         assert limited_client.post("/auth/token", data={"username":"demo","password":"wrong"}).status_code == 401

@@ -13,9 +13,13 @@ from app.db import get_db
 from app.deps import get_settings
 from app.models import RefreshToken, User
 from app.rate_limit import limiter
-from app.security import create_access_token, seed_user_if_missing, verify_password
+from app.security import create_access_token, hash_password, seed_user_if_missing, verify_password
 
 router = APIRouter(tags=["auth"])
+
+# Fixed dummy (cost 12) so an unknown username pays the same bcrypt cost as a
+# wrong password on a real account — no username-enumeration timing oracle.
+_DUMMY_PASSWORD_HASH = hash_password(secrets.token_urlsafe(32))
 
 @router.post("/auth/token")
 @limiter.limit("5/minute")
@@ -28,7 +32,11 @@ def login(
 ) -> dict:
     seed_user_if_missing(settings, session)
     user = session.scalar(select(User).where(User.username == form_data.username))
-    if user is None or not verify_password(form_data.password, user.password_hash):
+    # Verify unconditionally (dummy hash when the user is missing) so both
+    # branches pay the same bcrypt cost before the identical 401.
+    stored_hash = user.password_hash if user is not None else _DUMMY_PASSWORD_HASH
+    valid = verify_password(form_data.password, stored_hash)
+    if user is None or not valid:
         raise HTTPException(status_code=401, detail="Incorrect username or password")
 
     access_token = create_access_token(str(user.id), settings)
