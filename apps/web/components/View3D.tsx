@@ -124,11 +124,20 @@ export default function View3D({ results }: View3DProps) {
     camera.lookAt(0, 10, 0);
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.target.set(0, 10, 0);
-    renderer.setSize(
-      container.clientWidth || 640,
-      container.clientHeight || 480,
-      false,
-    );
+
+    // Keep buffer size, pixel ratio and the projection in lockstep with the
+    // (always non-square) container — both at init and on window resizes,
+    // else the aspect-1 projection stretches spheres into ellipses.
+    const applySize = () => {
+      const width = container.clientWidth || 640;
+      const height = container.clientHeight || 480;
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.setSize(width, height, false);
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+    };
+    applySize();
+    window.addEventListener("resize", applySize);
 
     sceneRef.current = scene;
 
@@ -140,6 +149,7 @@ export default function View3D({ results }: View3DProps) {
 
     return () => {
       cancelAnimationFrame(frameId);
+      window.removeEventListener("resize", applySize);
       controls.dispose();
       renderer.dispose();
       sceneRef.current = null;

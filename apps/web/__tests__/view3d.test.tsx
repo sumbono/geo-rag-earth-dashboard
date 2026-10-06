@@ -76,8 +76,13 @@ const hoisted = vi.hoisted(() => {
   }
 
   class MockCamera {
+    aspect = 1;
     position = { set: vi.fn() };
     lookAt = vi.fn();
+    updateProjectionMatrix = vi.fn();
+    constructor() {
+      cameras.push(this);
+    }
   }
 
   class MockRenderer {
@@ -85,7 +90,11 @@ const hoisted = vi.hoisted(() => {
     dispose = vi.fn();
     render = vi.fn();
     setSize = vi.fn();
+    setPixelRatio = vi.fn();
     constructor(options: { canvas: HTMLCanvasElement }) {
+      if (flags.rendererThrow) {
+        throw new Error("Error creating WebGL context.");
+      }
       this.domElement = options.canvas;
       renderers.push(this);
     }
@@ -123,8 +132,10 @@ const hoisted = vi.hoisted(() => {
 
   const renderers: InstanceType<typeof MockRenderer>[] = [];
   const scenes: InstanceType<typeof MockScene>[] = [];
+  const cameras: InstanceType<typeof MockCamera>[] = [];
   const controls: InstanceType<typeof MockControls>[] = [];
   const mapInstances: InstanceType<typeof MockMap>[] = [];
+  const flags = { rendererThrow: false };
 
   return {
     MockColor,
@@ -139,8 +150,10 @@ const hoisted = vi.hoisted(() => {
     MockPopup,
     renderers,
     scenes,
+    cameras,
     controls,
     mapInstances,
+    flags,
   };
 });
 
@@ -201,6 +214,20 @@ const sampleResults: SearchResult[] = [
 /** Set to `null` in a test to make context creation fail. */
 let getContextResult: object | null;
 
+/** Shadow `clientWidth`/`clientHeight` on every div so View3D's container
+ *  reports a controllable size (jsdom normally reports 0). Removed in
+ *  afterEach via `Reflect.deleteProperty`. */
+function stubContainerSize(size: { width: number; height: number }) {
+  Object.defineProperty(HTMLDivElement.prototype, "clientWidth", {
+    configurable: true,
+    get: () => size.width,
+  });
+  Object.defineProperty(HTMLDivElement.prototype, "clientHeight", {
+    configurable: true,
+    get: () => size.height,
+  });
+}
+
 let consoleError: ReturnType<typeof vi.spyOn>;
 let consoleWarn: ReturnType<typeof vi.spyOn>;
 
@@ -226,11 +253,17 @@ beforeEach(() => {
 
   hoisted.renderers.length = 0;
   hoisted.scenes.length = 0;
+  hoisted.cameras.length = 0;
   hoisted.controls.length = 0;
   hoisted.mapInstances.length = 0;
+  hoisted.flags.rendererThrow = false;
 });
 
 afterEach(() => {
+  // Size stubs first so a failed assertion below cannot leak them.
+  Reflect.deleteProperty(HTMLDivElement.prototype, "clientWidth");
+  Reflect.deleteProperty(HTMLDivElement.prototype, "clientHeight");
+
   // Collect before restoring so a failure still cleans up the spies.
   const errors = consoleError.mock.calls.map((args: unknown[]) =>
     String(args[0]),
@@ -329,6 +362,49 @@ describe("View3D", () => {
     expect(container).toHaveTextContent("3D unavailable");
     expect(container.querySelector("canvas")).toBeNull();
     expect(hoisted.renderers).toHaveLength(0);
+  });
+
+  it("falls back to a 3D unavailable message when the WebGLRenderer constructor throws", () => {
+    hoisted.flags.rendererThrow = true;
+
+    const { container } = render(<View3D results={sampleResults} />);
+
+    expect(container).toHaveTextContent("3D unavailable");
+    expect(container.querySelector("canvas")).toBeNull();
+    expect(hoisted.renderers).toHaveLength(0);
+  });
+
+  it("sizes the drawing buffer to the container and matches the camera aspect on init", () => {
+    stubContainerSize({ width: 900, height: 600 });
+
+    render(<View3D results={sampleResults} />);
+
+    const renderer = hoisted.renderers[0];
+    const camera = hoisted.cameras[0];
+    expect(renderer.setSize).toHaveBeenCalledWith(900, 600, false);
+    expect(renderer.setPixelRatio).toHaveBeenCalledWith(
+      Math.min(window.devicePixelRatio || 1, 2),
+    );
+    // The review fix: aspect follows the (non-square) container, not 1.
+    expect(camera.aspect).toBeCloseTo(900 / 600, 6);
+    expect(camera.updateProjectionMatrix).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-applies size and camera aspect when the window (and container) resizes", () => {
+    const size = { width: 900, height: 600 };
+    stubContainerSize(size);
+
+    render(<View3D results={sampleResults} />);
+    const renderer = hoisted.renderers[0];
+    const camera = hoisted.cameras[0];
+    expect(renderer.setSize).toHaveBeenCalledTimes(1);
+
+    size.width = 1500; // the container grew with the window
+    fireEvent.resize(window);
+
+    expect(renderer.setSize).toHaveBeenLastCalledWith(1500, 600, false);
+    expect(camera.aspect).toBeCloseTo(1500 / 600, 6);
+    expect(camera.updateProjectionMatrix).toHaveBeenCalledTimes(2);
   });
 
   it("cancels the animation frame and disposes renderer, controls, geometry and material on unmount", () => {
