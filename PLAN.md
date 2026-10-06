@@ -43,7 +43,7 @@ ingestion, full-resolution imagery storage, multi-region coverage, mobile app.
 | D4 | Data scope | Saudi Red Sea coast, 512px RGB+NIR chips, low-thousands of rows | CPU-precomputable on this machine; honest, bounded |
 | D5 | Message queue | **None** — telemetry via API → Postgres | Kafka is already proven in production work elsewhere; adding it here is ops weight without new signal |
 | D6 | Deployment | Coolify stack on this machine, host `geo.sumbono.dev` | Reuses existing Traefik/Let's Encrypt; matches "You Build It You Run It" |
-| D7 | Credentials | Cloudflare: `/home/bono/documents/cloudflare.txt` · Coolify API: `/home/bono/documents/coolify-api-token.txt` | Located 2026-10-06; never committed to repo; `.env.example` only |
+| D7 | Credentials | Cloudflare + Coolify API credentials live in a local secrets directory **outside this repo** on the deploy host | Never committed; scripts read them from env vars at deploy time only; `.env.example` in-repo |
 | D8 | Imagery source | **Element84 Earth Search STAC API v1** (`earth-search.aws.element84.com/v1`, collection `sentinel-2-l2a`) | Verified live 2026-10-06: no auth, no requester-pays marker; Copernicus bulk API needs registration and lost |
 | D9 | Embedding model | **RemoteCLIP ViT-B/32** via OpenCLIP + `hf_hub_download("chendelong/RemoteCLIP", ...)` | Official weights verified on Hugging Face; RS-domain model is a better story than vanilla CLIP; 512-dim output |
 
@@ -70,7 +70,7 @@ Cloudflare-managed DNS for `sumbono.dev`.
 ## 3. Repository Layout
 
 ```
-geo-rag-earth-dashboard/          ← this repo (/home/bono/portfolio/geo-rag-earth-dashboard)
+geo-rag-earth-dashboard/          ← this repo
 ├── PLAN.md                       # this spec
 ├── README.md                     # public pitch, quickstart, demo credentials, badges
 ├── docker-compose.yml            # full local stack (db + api + web)
@@ -267,8 +267,8 @@ clock is the source scene metadata / ingest time, not the browser):**
 
 ## 9. Deployment Plan
 
-1. Cloudflare DNS: `geo.sumbono.dev` A record → this machine's IP
-   (via Cloudflare API using `/home/bono/documents/cloudflare.txt`).
+1. Cloudflare DNS: `geo.sumbono.dev` A record → the deploy host's IP
+   (via Cloudflare API; credentials from the host's local secrets directory).
 2. Coolify: create project + app from repo, compose file
    `docker-compose.coolify.yml`, host `geo.sumbono.dev`, healthcheck
    `GET /health` (Coolify API token available for scripted setup).

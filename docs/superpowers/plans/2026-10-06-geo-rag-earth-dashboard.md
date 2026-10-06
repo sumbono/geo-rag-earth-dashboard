@@ -20,10 +20,10 @@
 - Chip extraction: 512×512 px windows, 128 px stride, bbox from scene geotransform, SRID 4326.
 - Basemap: ESRI World Imagery (default, attribution shown) + OSM streets toggle. No Mapbox, no tile API keys.
 - Cookies: `access_token` (15 min) and `refresh_token` (7 d), both httpOnly, SameSite=Strict; `PUBLIC_ORIGIN=https://geo.sumbono.dev` in prod.
-- No secrets in repo — `.env.example` only. Credentials read from `/home/bono/documents/cloudflare.txt` and `/home/bono/documents/coolify-api-token.txt` at deploy time only.
+- No secrets in repo — `.env.example` only. Cloudflare and Coolify credentials are read at deploy time only, from a local secrets directory on the deploy host (never from the repo; never printed in logs).
 - API routes are defined WITHOUT the `/api` prefix (`/auth/token`, `/search/vector`, …); Next.js rewrites `/api/:path*` → `http://api:8000/:path*`. External surface is always `/api/...`.
 - Torch/open_clip must be lazy-imported (inside encoder class only) so unit tests and CI run without ML deps (`requirements.txt` = core; `requirements-ml.txt` = torch/open_clip).
-- Host: `geo.sumbono.dev`. Repo root: `/home/bono/portfolio/geo-rag-earth-dashboard` (worktree: `.claude/worktrees/parsed-wandering-hare`).
+- Host: `geo.sumbono.dev`. Deploy-credential files live on the deploy host in a local secrets directory outside this repo (paths in the private notes); scripts read them at deploy time only.
 
 ## Review Focus
 
@@ -1095,7 +1095,7 @@ CMD ["npm", "start"]
 - Modify: `README.md` (live badge), `PLAN.md` (§10 milestone status)
 
 **Interfaces:**
-- Consumes: `/home/bono/documents/cloudflare.txt` (format read defensively — expect `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ZONE_ID`, or a single token + zone lookup by `sumbono.dev`; script prints which it found), `/home/bono/documents/coolify-api-token.txt` (token; base URL `http://localhost:8000`), Coolify API.
+- Consumes: deploy-host secrets directory (paths in the private notes, not this repo) — `CLOUDFLARE_API_TOKEN` (+ `CLOUDFLARE_ZONE_ID`, or a single token + zone lookup by `sumbono.dev`; script prints which it found) and the Coolify API token (base URL `http://localhost:8000`); Coolify API.
 - Produces: `deploy/cloudflare-dns.sh` creates/updates A record `geo` → `$(curl -s ifconfig.me)` via Cloudflare API v4; `deploy/coolify-deploy.sh` creates project + docker-compose-github-or-path resource via Coolify API pointing at this repo + `docker-compose.coolify.yml`, waits for healthy.
 
 - [ ] **Step 1: DNS** — run `deploy/cloudflare-dns.sh`; `dig +short geo.sumbono.dev` → machine IP.
