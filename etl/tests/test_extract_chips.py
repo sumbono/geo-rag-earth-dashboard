@@ -371,3 +371,102 @@ def test_default_out_dir_is_data_thumbs(tmp_path, monkeypatch):
     assert (tmp_path / "data" / "thumbs" / f"{cid}.jpg").is_file()
     assert (tmp_path / "data" / "thumbs" / "chips_manifest.jsonl").is_file()
     assert (tmp_path / "data" / "chips" / f"{cid}.npy").is_file()  # sibling cache
+
+
+# --------------------------------------------------------------------------
+# Review fix round 1 — Ruling R12 guards + review findings 2 and 3
+# --------------------------------------------------------------------------
+
+
+def test_dense_grid_warning_and_max_chips_truncation(tmp_path, caplog):
+    """R12: >500 projected chips/scene warns; max_chips stops with a record.
+
+    Default stride=128 on a real 10980² scene would produce 6724 chips/scene
+    (~26 GiB of .npy) — the brief's signature defaults stay, so the guards
+    are a dense-grid WARNING at projection time plus an optional cap.
+    """
+    import extract_chips
+
+    scene = make_fixture_tif(tmp_path / "S2A_DENSE")
+    out = tmp_path / "thumbs"
+    # starts floor((1024-64)/32)+1 = 31 per axis -> 961 projected chips; cap at 3
+    with caplog.at_level(logging.WARNING):
+        chips = extract_chips.extract_chips(
+            scene_dir=scene, out_dir=out, chip_size=64, stride=32, max_chips=3
+        )
+
+    assert len(chips) == 3  # stopped after N chips
+    # (a) dense-grid warning at extraction start, from dims + chip_size/stride
+    assert any(
+        "dense grid" in m and "stride=32" in m and "961" in m for m in caplog.messages
+    )
+    # (b) truncation WARNING naming max_chips
+    assert any("max_chips" in m and "truncated" in m for m in caplog.messages)
+    # truncation recorded in the manifest output (and the returned records)
+    lines = [
+        json.loads(line)
+        for line in (out / "chips_manifest.jsonl").read_text().splitlines()
+    ]
+    assert len(lines) == 3
+    assert all(line.get("truncated") is True for line in lines)
+    assert all(record.get("truncated") is True for record in chips)
+    # only the truncated chips' artifacts exist (not the 900-chip grid)
+    assert len(list(out.glob("*.jpg"))) == 6  # 3 true-color + 3 false-color
+    # deterministic ids = first 3 grid positions (row-major from 0,0)
+    assert chips[0]["chip_id"] == str(
+        uuid.uuid5(extract_chips.CHIP_NAMESPACE, f"{scene.name}:0:0")
+    )
+    assert chips[2]["chip_id"] == str(
+        uuid.uuid5(extract_chips.CHIP_NAMESPACE, f"{scene.name}:0:64")
+    )
+
+
+def test_url_scene_id_unrecognized_skips_with_warning(tmp_path, monkeypatch, caplog):
+    """Review finding 2: href parent dir matching neither known id pattern.
+
+    A deeper/differently-nested signed MPC href would degrade scene_id to a
+    shared fragment -> identical chip_ids across scenes -> silent overwrite
+    and dedupe-dropped manifest lines. spec §7 style: skip with WARNING.
+    """
+    import extract_chips
+
+    urls = {
+        b: f"https://storage.example.com/some/deeper/path/my-scene-folder/{b}.tif"
+        for b in BANDS
+    }
+
+    def _boom(path):
+        raise AssertionError("unverifiable scene identity must skip before opening")
+
+    monkeypatch.setattr(extract_chips, "open_band", _boom)
+    with caplog.at_level(logging.WARNING):
+        chips = extract_chips.extract_chips(
+            scene_urls=urls, out_dir=tmp_path / "thumbs", chip_size=512, stride=512
+        )
+    assert chips == []
+    assert any(
+        "unrecognized" in m and "my-scene-folder" in m for m in caplog.messages
+    )
+    assert not (tmp_path / "thumbs").exists()  # no artifacts
+
+
+def test_manifest_non_object_line_ignored_not_fatal(tmp_path, caplog):
+    """Review finding 3: valid-JSON non-object line used to raise TypeError,
+    hit the broad per-scene catch and discard a scene whose artifacts were
+    already written."""
+    import extract_chips
+
+    scene = make_fixture_tif(tmp_path / "S2A_BADLINE")
+    out = tmp_path / "thumbs"
+    out.mkdir()
+    manifest = out / "chips_manifest.jsonl"
+    manifest.write_text('{"chip_id": "existing-chip"}\n42\n', encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING):
+        chips = extract_chips.extract_chips(
+            scene_dir=scene, out_dir=out, chip_size=512, stride=512
+        )
+    assert len(chips) == 4  # scene survived the junk line; artifacts kept
+    lines = [json.loads(l) for l in manifest.read_text().splitlines()]
+    assert len(lines) == 6  # 2 seeded lines left in place + 4 new records
+    assert any("malformed" in m for m in caplog.messages)

@@ -34,7 +34,17 @@ rather than failing cryptically inside /vsicurl/. No signing client lives here.
 
 **Errors (spec §7):** a scene missing any of B02/B03/B04/B08 is skipped with
 a WARNING log line (never a crash); so is a CRS-less scene (SRID 4326 bbox is
-a hard contract) or any per-scene read failure.
+a hard contract) or any per-scene read failure. URL-mode scenes whose href
+parent dir matches neither known catalog id pattern are skipped too — chip_id
+must be derived from a verifiable scene identity (review finding 2).
+
+**Density guard (Ruling R12):** the briefed signature defaults stay
+(stride=128), but at extraction start a projected grid above
+``DENSE_GRID_LIMIT`` (500) chips/scene logs a WARNING suggesting
+``stride=512 or max_chips``, and the optional ``max_chips`` parameter stops
+the scene after N chips (WARNING + ``"truncated": true`` recorded in the
+manifest output) — a real 10980² scene at stride=128 would otherwise project
+6724 chips ≈ 26 GiB of .npy.
 
 Chip identity: ``chip_id = uuid5(CHIP_NAMESPACE, f"{scene_id}:{row}:{col}")`` —
 deterministic across runs/machines (golden test pins it). bbox per chip derives
@@ -76,6 +86,8 @@ CHIP_NAMESPACE = uuid.uuid5(
     uuid.NAMESPACE_URL, "https://geo.sumbono.dev/geo-rag-earth-dashboard/chips"
 )
 MPC_BLOB_HOST = "blob.core.windows.net"
+# Ruling R12 (a): warn when a scene's projected grid exceeds this many chips
+DENSE_GRID_LIMIT = 500
 
 # scene-id day (reuses download_sentinel2's id conventions): Earth Search
 # "S2A_37QDD_20261004_0_L2A" / MPC "..._T37QDD_20261004T110813"-style ids.
@@ -266,7 +278,9 @@ def _append_manifest(path: Path, records: list[dict]) -> None:
                 continue
             try:
                 existing.add(json.loads(line)["chip_id"])
-            except (json.JSONDecodeError, KeyError):
+            except (json.JSONDecodeError, KeyError, TypeError):
+                # TypeError: a valid-JSON non-object line (e.g. "42") makes
+                # `line["chip_id"]` raise — skip the junk line, never the scene.
                 logger.warning("ignoring malformed chips manifest line in %s", path)
     new = [record for record in records if record["chip_id"] not in existing]
     if not new:
@@ -282,7 +296,9 @@ def _append_manifest(path: Path, records: list[dict]) -> None:
 # --------------------------------------------------------------------------
 
 
-def _extract_scene(sources, scene_id, scene_dt, out_dir, chip_size, stride, url_mode):
+def _extract_scene(
+    sources, scene_id, scene_dt, out_dir, chip_size, stride, url_mode, max_chips
+):
     """Open the scene's bands, write every full-size chip + manifest lines."""
     datasets: dict = {}
     env = (
@@ -313,13 +329,27 @@ def _extract_scene(sources, scene_id, scene_dt, out_dir, chip_size, stride, url_
                 scene_id, width, height, chip_size,
             )
             return []
+        # Ruling R12 (a): a real 10980² scene at the briefed stride=128 would
+        # project 6724 chips/scene (~26 GiB of .npy) — warn before writing.
+        projected = len(rows) * len(cols)
+        if projected > DENSE_GRID_LIMIT:
+            logger.warning(
+                "scene %s: dense grid at stride=%d produces %d chips/scene — "
+                "consider stride=512 or max_chips",
+                scene_id, stride, projected,
+            )
         out_dir.mkdir(parents=True, exist_ok=True)
         npy_dir = out_dir.parent / "chips"  # sibling cache dir (out of thumbs)
         npy_dir.mkdir(parents=True, exist_ok=True)
 
         records: list[dict] = []
+        truncated = False
         for row in rows:
             for col in cols:
+                # Ruling R12 (b): optional cap stops the scene after N chips.
+                if max_chips is not None and len(records) >= max_chips:
+                    truncated = True
+                    break
                 window = Window(col, row, chip_size, chip_size)
                 band_px = {
                     band: datasets[band].read(1, window=window) for band in BANDS
@@ -346,6 +376,16 @@ def _extract_scene(sources, scene_id, scene_dt, out_dir, chip_size, stride, url_
                         "scene_datetime": scene_dt,
                     }
                 )
+            if truncated:
+                break
+        if truncated:
+            logger.warning(
+                "scene %s: max_chips=%d reached after %d of %d projected "
+                "chips — extraction truncated (recorded in chips_manifest.jsonl)",
+                scene_id, max_chips, len(records), projected,
+            )
+            for record in records:
+                record["truncated"] = True
         _append_manifest(out_dir / "chips_manifest.jsonl", records)
         logger.info(
             "scene %s: %d chips extracted (chip_size=%d stride=%d) -> %s",
@@ -363,6 +403,7 @@ def extract_chips(
     out_dir: Path | None = None,
     chip_size: int = DEFAULT_CHIP_SIZE,
     stride: int = DEFAULT_STRIDE,
+    max_chips: int | None = None,
 ) -> list[ChipRecord]:
     """Extract every full-size chip of one scene; returns the ChipRecords.
 
@@ -377,11 +418,19 @@ def extract_chips(
                       4-band ``{chip_id}.npy`` goes to the sibling
                       ``../chips/`` cache dir; ``chips_manifest.jsonl`` lands
                       in ``out_dir`` (appended, deduped by chip_id).
+    ``max_chips``   — optional cap (Ruling R12): stop after N chips with a
+                      WARNING; every record of a truncated run carries
+                      ``"truncated": true`` in the returned ChipRecords and
+                      in chips_manifest.jsonl. Default ``None`` extracts the
+                      full grid.
 
     ChipRecord: ``{chip_id, chip_path, npy_path, bbox (w,s,e,n) SRID 4326,
     scene_datetime}``. Skipped scenes (missing band, unsigned MPC blob URL,
-    no CRS, read failure) log WARNING/ERROR and return ``[]`` — never crash
-    (spec §7).
+    URL-mode scene id matching neither known catalog pattern, no CRS, read
+    failure) log WARNING/ERROR and return ``[]`` — never crash (spec §7).
+    A scene whose projected grid exceeds ``DENSE_GRID_LIMIT`` chips logs a
+    dense-grid WARNING at extraction start (the briefed stride=128 over a
+    real 10980² scene would project 6724 chips/scene).
     """
     if scene_dir is None and scene_urls is None:
         raise ValueError(
@@ -417,10 +466,24 @@ def extract_chips(
             scene_id, ", ".join(unsigned),
         )
         return []
+    if url_mode and scene_dt is None:
+        # Review finding 2: scene id derived from the href's parent dir
+        # matched neither known catalog pattern — a nested/differing signed
+        # MPC path could degrade it to a shared fragment, colliding chip_ids
+        # across scenes (overwrite + dedupe-dropped manifest lines).
+        # Without a verifiable identity there is no stable chip_id: skip.
+        logger.warning(
+            "scene %s: unrecognized scene id in band hrefs (neither Earth "
+            "Search nor MPC pattern) — cannot derive a stable chip identity, "
+            "scene skipped (spec §7)",
+            scene_id,
+        )
+        return []
 
     try:
         return _extract_scene(
-            sources, scene_id, scene_dt, out_dir, chip_size, stride, url_mode
+            sources, scene_id, scene_dt, out_dir, chip_size, stride, url_mode,
+            max_chips,
         )
     except Exception as exc:  # noqa: BLE001 — per-scene failure skips, not crashes
         logger.warning(
