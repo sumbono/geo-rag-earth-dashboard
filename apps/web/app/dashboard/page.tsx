@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useRef, useState } from "react";
 import BboxDraw, { type BboxDrawHandle } from "../../components/BboxDraw";
 import DetailPanel from "../../components/DetailPanel";
@@ -11,6 +12,20 @@ import ResultsPanel from "../../components/ResultsPanel";
 import SearchBar from "../../components/SearchBar";
 import { ApiError, searchVector } from "../../lib/api";
 import type { SearchResult } from "../../lib/types";
+
+// three.js must never load during SSR — client-only, loaded on demand when
+// the 3D tab is first opened.
+const View3D = dynamic(() => import("../../components/View3D"), { ssr: false });
+
+/** Main-viewport tabs: the map (default), the Task 20 3D view, and the
+ *  Task 21 telemetry placeholder. */
+type Tab = "map" | "3d" | "telemetry";
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: "map", label: "Map" },
+  { id: "3d", label: "3D" },
+  { id: "telemetry", label: "Telemetry" },
+];
 
 /**
  * Union of two result lists keyed by id — a shared id keeps the higher score
@@ -42,6 +57,11 @@ function unionByIdMax(
  * captured at submit so later edits don't leak into the bbox `q`), and the
  * merge — BboxDraw runs the two-click machine and POSTs; its hits are unioned
  * into `results` by id with max score winning.
+ *
+ * Task 20: a Map | 3D | Telemetry tab bar (aria-pressed toggles) swaps the
+ * main viewport — the map grid, the client-only Three.js `<View3D>` of the
+ * same results, or the Telemetry placeholder Task 21 will fill in. Search,
+ * bbox draw, errors and the DetailPanel live outside the tabs.
  */
 export default function DashboardPage() {
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -52,6 +72,7 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [drawMode, setDrawMode] = useState(false);
   const [currentQuery, setCurrentQuery] = useState("");
+  const [tab, setTab] = useState<Tab>("map");
   const mapRef = useRef<MapHandle | null>(null);
   const bboxDrawRef = useRef<BboxDrawHandle | null>(null);
 
@@ -130,6 +151,21 @@ export default function DashboardPage() {
         onRectangle={(bbox) => mapRef.current?.setRectangle(bbox)}
         onError={handleError}
       />
+      <div style={{ display: "flex", gap: 8 }} role="group" aria-label="View">
+        {TABS.map(({ id, label }) => (
+          <button
+            key={id}
+            type="button"
+            className={
+              tab === id ? "button button--primary" : "button button--ghost"
+            }
+            aria-pressed={tab === id}
+            onClick={() => setTab(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       {error !== null && (
         <p role="alert" style={{ margin: 0, color: "#b91c1c" }}>
           {error}
@@ -140,34 +176,38 @@ export default function DashboardPage() {
           Searching…
         </p>
       )}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(0, 1fr) 300px",
-          gap: 12,
-          alignItems: "start",
-        }}
-      >
-        <MapView
-          ref={mapRef}
-          results={results}
-          onPick={setSelectedId}
-          onMapClick={
-            drawMode
-              ? (lonLat) => bboxDrawRef.current?.handleMapClick(lonLat)
-              : undefined
-          }
-        />
-        {results.length > 0 ? (
-          <ResultsPanel
+      {tab === "map" && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1fr) 300px",
+            gap: 12,
+            alignItems: "start",
+          }}
+        >
+          <MapView
+            ref={mapRef}
             results={results}
-            selectedId={selectedId}
             onPick={setSelectedId}
+            onMapClick={
+              drawMode
+                ? (lonLat) => bboxDrawRef.current?.handleMapClick(lonLat)
+                : undefined
+            }
           />
-        ) : searched ? (
-          <EmptyState onSuggest={handleSuggest} />
-        ) : null}
-      </div>
+          {results.length > 0 ? (
+            <ResultsPanel
+              results={results}
+              selectedId={selectedId}
+              onPick={setSelectedId}
+            />
+          ) : searched ? (
+            <EmptyState onSuggest={handleSuggest} />
+          ) : null}
+        </div>
+      )}
+      {tab === "3d" && <View3D results={results} />}
+      {tab === "telemetry" && <div>Telemetry</div>}
       {selectedTile !== null && (
         <DetailPanel
           key={selectedTile.id}
