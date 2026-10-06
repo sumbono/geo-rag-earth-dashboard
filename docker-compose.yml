@@ -14,4 +14,14 @@ services:
       test: ["CMD-SHELL", "pg_isready -U postgres -d geo"]
       interval: 5s
       retries: 10
+  api:
+    build: { context: ./apps/api }
+    environment: [DATABASE_URL=postgresql+psycopg://postgres:postgres@db:5432/geo,
+                  JWT_SECRET, REFRESH_SECRET, DEMO_USER, DEMO_PASSWORD, ENCODER, RATE_LIMIT_ENABLED]
+    depends_on: { db: { condition: service_healthy } }
+  web:
+    build: ./apps/web
+    environment: [API_INTERNAL_URL=http://api:8000]
+    ports: ["3000:3000"]
+    depends_on: [api]
 volumes: { pgdata: {} }

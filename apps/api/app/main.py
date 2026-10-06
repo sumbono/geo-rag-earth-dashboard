@@ -35,3 +35,9 @@ def create_app(settings: Settings) -> FastAPI:
     app.include_router(telemetry.router)
     app.include_router(thumbs.router)
     return app
+
+
+# Module-level entrypoint for uvicorn (`app.main:app`, as in the Dockerfile
+# CMD). `create_app` stays the injectable factory tests call directly — this
+# line only gives the server process an app built from the ambient Settings.
+app = create_app(Settings())
