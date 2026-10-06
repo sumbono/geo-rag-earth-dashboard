@@ -1,9 +1,9 @@
 import Link from "next/link";
 
 /**
- * Public landing page (front door of the application). Auth-guarded product
- * surfaces (login, dashboard) arrive in Tasks 16+; the preview slots below
- * are filled with real screenshots/GIF in Task 24.
+ * Public landing page (front door of the application). The /login form and
+ * the auth-guarded /dashboard shell exist as of Task 16; the preview slots
+ * below are filled with real screenshots/GIF in Task 24.
  */
 export default function Home() {
   return (

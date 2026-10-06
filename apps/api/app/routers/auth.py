@@ -1,4 +1,5 @@
-"""Login (password grant) and refresh (rotation): JWT access + opaque refresh cookies."""
+"""Auth routes: login (password grant), refresh (rotation), session probe
+(/auth/me), logout — JWT access + opaque refresh cookies."""
 import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -18,6 +19,7 @@ from app.security import (
     hash_password,
     mint_refresh_token,
     seed_user_if_missing,
+    verify_jwt,
     verify_password,
 )
 
@@ -75,6 +77,50 @@ def login(
 
     _set_auth_cookies(response, settings, access_token, raw_refresh)
     return {"token_type": "bearer"}
+
+def _clear_auth_cookies(response: Response, settings: Settings) -> None:
+    """Delete both auth cookies — same names/flags/path as _set_auth_cookies,
+    so the browser matches and drops the pair it was issued at login."""
+    secure = settings.public_origin.startswith("https")
+    for name in ("access_token", "refresh_token"):
+        response.delete_cookie(name, httponly=True, samesite="strict", secure=secure)
+
+@router.get("/auth/me")
+def me(user: User = Depends(verify_jwt)) -> dict:
+    """Who the access-token cookie says we are — the cheap, credential-free
+    session probe the web AuthGuard runs when the dashboard mounts."""
+    return {"username": user.username}
+
+@router.post("/auth/logout")
+def logout(
+    request: Request,
+    response: Response,
+    user: User = Depends(verify_jwt),
+    settings: Settings = Depends(get_settings),
+    session: Session = Depends(get_db),
+) -> dict:
+    """End the session: revoke the presented refresh row and clear both cookies.
+
+    Guarded by verify_jwt — the plan's matrix makes only /auth/token and
+    /auth/refresh public, so an anonymous call is 401 (same as /auth/me), not
+    a silent cookie clear. Revocation is scoped to the logged-in user's row
+    (hash match + user_uuid): possession of the presented token lets you kill
+    it, never someone else's. Cookies are cleared regardless of whether a
+    refresh cookie was presented, so a stale pair cannot linger.
+    """
+    raw = request.cookies.get("refresh_token")
+    if raw:
+        session.execute(
+            update(RefreshToken)
+            .where(
+                RefreshToken.token_hash == hashlib.sha256(raw.encode()).hexdigest(),
+                RefreshToken.user_uuid == user.id,
+            )
+            .values(revoked_at=datetime.now(timezone.utc))
+        )
+        session.commit()
+    _clear_auth_cookies(response, settings)
+    return {"ok": True}
 
 @router.post("/auth/refresh")
 @limiter.limit("5/minute")

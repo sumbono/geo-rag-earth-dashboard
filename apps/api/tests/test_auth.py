@@ -38,16 +38,55 @@ def test_login_rate_limited(limited_client):
 
 @pytest.mark.db
 def test_protected_routes_reject_anonymous(create_client):
+    # Plan matrix: every route except /auth/token and /auth/refresh is JWT-gated
+    # — /auth/me and /auth/logout included (Task 16).
     routes = ["/search/vector", "/search/bbox", "/telemetry/query",
-              "/telemetry/ingest", "/thumbs/00000000-0000-0000-0000-000000000000"]
+              "/telemetry/ingest", "/thumbs/00000000-0000-0000-0000-000000000000",
+              "/auth/me", "/auth/logout"]
     for path in routes:
         # Dispatch on the path set: httpx's get() has no json kwarg (json=None
         # would TypeError) and bound-method identity (`m is obj.post`) is never
         # stable — so POSTs send an empty JSON body, GETs send none.
-        is_post = path in ("/search/vector", "/search/bbox", "/telemetry/ingest")
+        is_post = path in ("/search/vector", "/search/bbox", "/telemetry/ingest",
+                           "/auth/logout")
         method = create_client.post if is_post else create_client.get
         r = method(path, json={}) if is_post else method(path)
         assert r.status_code == 401, f"{path} not protected"
+
+
+@pytest.mark.db
+def test_me_returns_logged_in_username(create_client):
+    assert create_client.get("/auth/me").status_code == 401  # anonymous first
+    login(create_client)
+    r = create_client.get("/auth/me")
+    assert r.status_code == 200
+    assert r.json() == {"username": "demo"}
+
+
+@pytest.mark.db
+def test_logout_clears_cookies_and_revokes_refresh(create_client, engine_session):
+    r = create_client.post("/auth/token", data={"username": "demo", "password": "demo-pass-123"})
+    assert r.status_code == 200
+    raw = r.cookies["refresh_token"]
+
+    r = create_client.post("/auth/logout")
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}
+    # Both cookies deleted (Set-Cookie expiry processed into the client jar).
+    assert create_client.cookies.get("access_token") is None
+    assert create_client.cookies.get("refresh_token") is None
+
+    # The presented refresh row is revoked, not merely hidden by cookie clear.
+    revoked_at = engine_session.scalar(
+        select(RefreshToken.revoked_at).where(
+            RefreshToken.token_hash == hashlib.sha256(raw.encode()).hexdigest()
+        )
+    )
+    assert revoked_at is not None
+
+    # Re-presenting the dead token cannot mint a new session (reuse → 401).
+    create_client.cookies.set("refresh_token", raw)
+    assert create_client.post("/auth/refresh").status_code == 401
 
 
 @pytest.mark.db
