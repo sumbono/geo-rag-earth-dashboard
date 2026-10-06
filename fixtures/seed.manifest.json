@@ -1,0 +1,30 @@
+{
+  "chip_size": 512,
+  "database": "geo",
+  "embedded_chips": 90,
+  "encoder": "remoteclip",
+  "extracted_chips": 100,
+  "generated_at": "2026-10-06T19:47:22Z",
+  "gz_bytes": 228520,
+  "max_chips_per_scene": [
+    34,
+    33,
+    33
+  ],
+  "scenes": [
+    "S2C_36QZD_20261005_0_L2A",
+    "S2C_36QYG_20261005_0_L2A",
+    "S2C_36QZG_20261005_0_L2A"
+  ],
+  "stride": 512,
+  "tables": [
+    "tiles",
+    "telemetry"
+  ],
+  "telemetry_count": 5040,
+  "telemetry_inserted": 5039,
+  "tiles_count": 100,
+  "tiles_requested": 100,
+  "tool": "etl/make_fixture_dump.py",
+  "version": 1
+}

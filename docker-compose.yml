@@ -9,6 +9,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./deploy/initdb:/docker-entrypoint-initdb.d
+      - ./fixtures:/fixtures:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d geo"]
       interval: 5s
