@@ -550,11 +550,38 @@ def _coverage(scenes: list) -> dict:
     }
 
 
+def _merge_scene_record(existing: dict | None, incoming: dict) -> dict:
+    """Merge one incoming record into the manifest (keyed by scene_id).
+
+    Download evidence on disk must survive a later manifest-only query:
+    re-running the documented default (no-flag) command over an already
+    downloaded scene must not reset files=[] / status and orphan the TIFFs
+    Task 12 consumes. Rules: an incoming record WITH files (fresh download)
+    always wins; an incoming record without files never erases an existing
+    record's files/status/reason (they describe what is on disk); URL,
+    datetime, bbox and cloud-cover metadata always come from the freshest
+    query.
+    """
+    if existing is None:
+        return incoming
+    if incoming.get("files"):
+        return incoming
+    if existing.get("files") or existing.get("status") == "downloaded":
+        return {
+            **incoming,
+            "files": existing.get("files", []),
+            "status": existing.get("status", incoming.get("status")),
+            "reason": existing.get("reason"),
+        }
+    return incoming
+
+
 def finalize_manifest(cache_dir: Path, new_records: list, run_info: dict) -> dict:
-    """Upsert this run's records into $cache_dir/manifest.json and return it.
+    """Merge this run's records into $cache_dir/manifest.json and return it.
 
     Scenes persist on disk across runs, so the manifest accumulates by
-    scene_id instead of being clobbered by a later run over a smaller bbox.
+    scene_id (per-scene merge, see _merge_scene_record) instead of being
+    clobbered by a later run over a smaller bbox or a manifest-only rerun.
     """
     cache_dir = Path(cache_dir)
     path = cache_dir / "manifest.json"
@@ -571,7 +598,9 @@ def finalize_manifest(cache_dir: Path, new_records: list, run_info: dict) -> dic
             logger.warning("could not read existing manifest %s (%s); rebuilding",
                            path, exc)
     for record in new_records:
-        scenes[record["scene_id"]] = record
+        scenes[record["scene_id"]] = _merge_scene_record(
+            scenes.get(record["scene_id"]), record
+        )
     manifest = {
         "version": 1,
         "generated_at": _utc_now(),

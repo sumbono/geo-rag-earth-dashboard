@@ -275,3 +275,147 @@ def test_query_ladder_unrecoverable_names_both_catalogs(tmp_path, monkeypatch, c
         rc = dls.main(["--bbox", "39.0", "21.0", "39.5", "21.5", "--max-scenes", "1"])
     assert rc == 2
     assert any("both catalogs down" in m for m in caplog.messages)
+
+
+def _seed_manifest(cache_dir, record):
+    """Write a manifest as an earlier run would have left it."""
+    (cache_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "generated_at": "2026-10-06T00:00:00Z",
+                "last_run": {},
+                "coverage": {},
+                "scenes": [record],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_manifest_upsert_preserves_download_state_on_manifest_only_rerun(
+    tmp_path, monkeypatch
+):
+    """Re-running the default (no-flag) command must not erase downloaded state.
+
+    Review finding (Important): the upsert replaced same-scene records
+    wholesale, resetting files=[] / status="manifest-only" over ~530 MB/scene
+    sitting on disk and driving coverage.scenes_downloaded to 0 (Task 12
+    consumes those paths). Metadata (URL/datetime/cloud) must still refresh
+    from the fresh query.
+    """
+    import download_sentinel2 as dls
+
+    item = es_item()
+    seed_files = [
+        str(tmp_path / item["id"] / f"{band}.tif") for band in ("B02", "B03", "B04", "B08")
+    ]
+    _seed_manifest(
+        tmp_path,
+        {
+            "scene_id": item["id"],
+            "datetime": "2026-10-04T08:04:23.747000Z",
+            "bbox": item["bbox"],
+            "cloud_cover": 0.0018,
+            "catalog": dls.EARTH_SEARCH_URL,
+            "assets": {band: item["assets"][key]["href"]
+                       for band, key in (("B02", "blue"), ("B03", "green"),
+                                         ("B04", "red"), ("B08", "nir"))},
+            "thumbnail": item["assets"]["thumbnail"]["href"],
+            "missing_bands": [],
+            "files": seed_files,
+            "status": "downloaded",
+            "reason": None,
+        },
+    )
+
+    # Fresh default run: same scene, refreshed metadata from the new query.
+    refreshed = es_item(
+        properties={
+            "datetime": "2026-10-04T08:04:24.000000Z",
+            "eo:cloud_cover": 1.25,
+        }
+    )
+    refreshed["assets"]["blue"] = {"href": f"{ES_COG_ROOT}/B02_v2.tif"}
+    monkeypatch.setattr(
+        dls, "search_scenes", lambda *a, **k: ([refreshed], dls.EARTH_SEARCH_URL)
+    )
+
+    def _boom(url, dest):
+        raise AssertionError("manifest-only rerun must not download")
+
+    monkeypatch.setattr(dls, "download_file", _boom)
+    monkeypatch.setenv("ETL_CACHE_DIR", str(tmp_path))
+
+    rc = dls.main(["--bbox", "39.0", "21.0", "39.5", "21.5", "--max-scenes", "1"])
+    assert rc == 0
+
+    merged = json.loads((tmp_path / "manifest.json").read_text())
+    assert len(merged["scenes"]) == 1
+    scene = merged["scenes"][0]
+    # PRESERVED: download state the R2 manifest promises to Task 12
+    assert scene["files"] == seed_files
+    assert scene["status"] == "downloaded"
+    assert merged["coverage"]["scenes_downloaded"] == 1
+    assert merged["coverage"]["scenes_manifest_only"] == 0
+    assert merged["coverage"]["coverage_pct"] == 100.0
+    # REFRESHED: URL / datetime / cloud-cover come from the fresh query
+    assert scene["cloud_cover"] == 1.25
+    assert scene["datetime"] == "2026-10-04T08:04:24.000000Z"
+    assert scene["assets"]["B02"].endswith("/B02_v2.tif")
+
+
+def test_manifest_upsert_fresh_download_overwrites_stale(tmp_path, monkeypatch):
+    """Inverse: when the incoming record carries files, it wins outright."""
+    import download_sentinel2 as dls
+
+    item = es_item()
+    _seed_manifest(
+        tmp_path,
+        {
+            "scene_id": item["id"],
+            "datetime": "2020-01-01T00:00:00.000000Z",
+            "bbox": item["bbox"],
+            "cloud_cover": 99.0,
+            "catalog": dls.EARTH_SEARCH_URL,
+            "assets": {band: item["assets"][key]["href"]
+                       for band, key in (("B02", "blue"), ("B03", "green"),
+                                         ("B04", "red"), ("B08", "nir"))},
+            "thumbnail": None,
+            "missing_bands": [],
+            "files": ["/stale/old/B02.tif"],
+            "status": "failed",
+            "reason": "old transport failure",
+        },
+    )
+
+    def fake_fetch(url, dest):
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"x" * 1024)
+        return dest.stat().st_size
+
+    monkeypatch.setattr(dls, "download_file", fake_fetch)
+    monkeypatch.setattr(
+        dls, "search_scenes", lambda *a, **k: ([item], dls.EARTH_SEARCH_URL)
+    )
+    monkeypatch.setenv("ETL_CACHE_DIR", str(tmp_path))
+
+    rc = dls.main(
+        ["--bbox", "39.0", "21.0", "39.5", "21.5",
+         "--max-scenes", "1", "--download-assets"]
+    )
+    assert rc == 0
+
+    merged = json.loads((tmp_path / "manifest.json").read_text())
+    scene = merged["scenes"][0]
+    fresh_files = [
+        str(tmp_path / item["id"] / f"{band}.tif")
+        for band in ("B02", "B03", "B04", "B08")
+    ]
+    assert scene["files"] == fresh_files  # stale path gone, fresh evidence in
+    assert all(os.path.exists(p) for p in scene["files"])
+    assert scene["status"] == "downloaded"
+    assert scene["reason"] is None
+    assert scene["cloud_cover"] == 0.0018
+    assert scene["datetime"] == item["properties"]["datetime"]
+    assert merged["coverage"]["scenes_downloaded"] == 1
