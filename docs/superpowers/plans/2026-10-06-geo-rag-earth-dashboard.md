@@ -713,7 +713,7 @@ def test_vector_search_ranked_and_protected(create_client, seeded_tiles):
 
 **Interfaces:**
 - Consumes: Task 4 `verify_jwt`; `Settings.thumbs_dir`.
-- Produces: `GET /thumbs/{tile_id}` → `image/jpeg` bytes from `{THUMBS_DIR}/{tile_id}.jpg` (path resolved and verified to start with `THUMBS_DIR.resolve()`); missing file or non-uuid id → 404. `thumb_url` from Task 7 points here through the `/api` proxy.
+- Produces: `GET /thumbs/{tile_id}` → `image/jpeg` bytes from `{THUMBS_DIR}/{tile_id}.jpg`, and `GET /thumbs/{tile_id}?fc=1` → `{THUMBS_DIR}/{tile_id}_fc.jpg` (false-color sibling, Option B). Path resolved and verified to start with `THUMBS_DIR.resolve()` for both variants; missing file or non-uuid id → 404. `thumb_url` from Task 7 points here through the `/api` proxy.
 
 - [ ] **Step 1: Write failing tests**
 
@@ -840,7 +840,12 @@ def test_one_scene_downloads(tmp_path):
 
 **Interfaces:**
 - Consumes: Task 11 manifest + TIFFs (local cache) **or scene asset URLs directly** — the probe (2026-10-06) proved the COGs support `Accept-Ranges: bytes`, so implement the primary path as **windowed reads via rasterio `rasterio.open(" /vsicurl/" + href)`** (read only each 512-px window over HTTP range requests); fall back to full local files when `scene_dir` is given.
-- Produces: `extract_chips(scene_dir: Path | None = None, scene_urls: dict[str, str] | None = None, out_dir: Path | None = None, chip_size=512, stride=128) -> list[ChipRecord]` where `ChipRecord = {chip_id: uuid5(scene_id+row+col), chip_path, bbox: (w,s,e,n), scene_datetime}`; `out_dir` **defaults to `data/thumbs` — the same directory `Settings.thumbs_dir` serves from** (Task 9); writes `{out_dir}/{chip_id}.jpg` (RGB preview) + `{chip_id}.npy` (4-band float array, sibling cache dir) and `chips_manifest.jsonl`. Task 13 reads this. **Missing band in a scene → scene skipped with a WARNING log line** (spec §7), never a crash.
+- Produces: `extract_chips(scene_dir: Path | None = None, scene_urls: dict[str, str] | None = None, out_dir: Path | None = None, chip_size=512, stride=128) -> list[ChipRecord]` where `ChipRecord = {chip_id: uuid5(scene_id+row+col), chip_path, bbox: (w,s,e,n), scene_datetime}`; `out_dir` **defaults to `data/thumbs` — the same directory `Settings.thumbs_dir` serves from** (Task 9). Per chip it writes **three artifacts**:
+  1. `{chip_id}.jpg` — true-color preview (R=G=B from B04/B03/B02),
+  2. `{chip_id}_fc.jpg` — **false-color preview (NIR-R-G = B08/B04/B03)**, the classic remote-sensing composite that gives the NIR band its visible job (Option B decision),
+  3. `{chip_id}.npy` — 4-band float array (B02,B03,B04,B08), sibling cache dir.
+
+  Plus `chips_manifest.jsonl`. Task 13 reads this. **Missing band in a scene → scene skipped with a WARNING log line** (spec §7), never a crash.
 
 - [ ] **Step 1: Write failing golden test**: build 1024×1024 synthetic GeoTIFF with known transform in-test → extract with chip_size=512, stride=512 → expect 4 chips; assert chip 0 bbox ≈ transform-derived corners within 1e-6; assert deterministic `chip_id` stable across runs.
 - [ ] **Step 2: Run → FAIL.** **Step 3: Implement** with `rasterio.windows.Window` + `rasterio.windows.transform`. **Step 4: Run → PASS.** **Step 5:** commit `feat: 512px chip extractor with georeferenced golden test"`.
@@ -855,7 +860,7 @@ def test_one_scene_downloads(tmp_path):
 
 **Interfaces:**
 - Consumes: Task 12 `chips_manifest.jsonl`; Task 2 models (run against compose `db`); Task 6's `RemoteCLIPEncoder` (import from `apps/api` via `sys.path` insert or shared package — **decision: `etl/` inserts `apps/api` on `sys.path` and reuses `app.encoder`, single source of truth**).
-- Produces: `python etl/embed_remoteclip.py --manifest path --batch 16` → idempotent upsert: `INSERT ... ON CONFLICT (id) DO UPDATE`; skips chips whose embedding is already non-null unless `--force`; prints progress `embedded N/M` and final count to `tiles`. **`thumb_path` stores only the relative filename** (`{chip_id}.jpg`), resolved against `Settings.thumbs_dir` at serve time — never an absolute path.
+- Produces: `python etl/embed_remoteclip.py --manifest path --batch 16` → idempotent upsert: `INSERT ... ON CONFLICT (id) DO UPDATE`; skips chips whose embedding is already non-null unless `--force`; prints progress `embedded N/M` and final count to `tiles`. **Band contract (explicit):** `RemoteCLIPEncoder.encode_image` consumes **only the 3-channel RGB view** (B04/B03/B02 → 224×224×3 float32) — the NIR band and false-color JPEG never feed the model; NIR exists for the false-color preview only. **`thumb_path` stores only the relative filename** (`{chip_id}.jpg`), resolved against `Settings.thumbs_dir` at serve time — never an absolute path; the false-color sibling is served as `GET /thumbs/{tile_id}?fc=1` (Task 9 gains this query param: `{tile_id}_fc.jpg` when `fc=1`, same auth/containment rules).
 
 - [ ] **Step 1: Write failing test**: seed 3 fake chip `.npy` files + manifest → run embed with `ENCODER=fake` (tests never download the model) → assert 3 rows in `tiles`, embeddings L2-normalized, re-run inserts nothing new (idempotent).
 - [ ] **Step 2: Run → FAIL.** **Step 3: Implement** (batch loop, `ON CONFLICT DO NOTHING` on first pass check). **Step 4: Run → PASS**; locally once with real encoder: run against 10 chips, assert `pgv_dim(embedding)=512`.
@@ -988,7 +993,7 @@ CMD ["npm", "start"]
 
 **Interfaces:**
 - Consumes: Task 17 state; `SearchResult`.
-- Produces: `<ScoreBarChart results={SearchResult[]} selectedId={string} />` — SVG horizontal bars, x = score (0..1), selected bar highlighted (accent color), labels = score values; `<DetailPanel tile={SearchResult} onClose={fn} />` showing thumb (`tile.thumb_url` — cookie auth makes `<img>` work), bbox text, `captured_at`, embedded `ScoreBarChart`; `<EmptyState onSuggest={(q: string) => void} />` with 3 clickable example queries ("turquoise coastal water", "desert near shoreline", "cloud patterns") shown when `results.length === 0 && searched`.
+- Produces: `<ScoreBarChart results={SearchResult[]} selectedId={string} />` — SVG horizontal bars, x = score (0..1), selected bar highlighted (accent color), labels = score values; `<DetailPanel tile={SearchResult} onClose={fn} />` showing thumb (`tile.thumb_url` — cookie auth makes `<img>` work), bbox text, `captured_at`, embedded `ScoreBarChart`, and a **True color / False color toggle** (Option B): switches `img.src` between `/api/thumbs/{id}` and `/api/thumbs/{id}?fc=1`; `<EmptyState onSuggest={(q: string) => void} />` with 3 clickable example queries ("turquoise coastal water", "desert near shoreline", "cloud patterns") shown when `results.length === 0 && searched`.
 
 - [ ] **Step 1: failing tests**: given 3 results, chart renders 3 `<rect>` and selected has highlight class; empty search renders `EmptyState` with suggestions; clicking a suggestion triggers search.
 - [ ] **Step 2: Run → FAIL.** **Step 3: Implement.** **Step 4: Run → PASS.** **Step 5:** commit `feat: detail panel, D3 score chart, empty-state suggestions"`.
