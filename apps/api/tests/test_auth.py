@@ -1,5 +1,9 @@
-import pytest
+import hashlib
 
+import pytest
+from sqlalchemy import select
+
+from app.models import RefreshToken
 from tests.helpers import login
 
 
@@ -64,11 +68,20 @@ def test_verify_jwt_accepts_valid_session(create_client):
 
 
 @pytest.mark.db
-def test_refresh_rotates_and_old_token_rejected(create_client):
+def test_refresh_rotates_and_old_token_rejected(create_client, engine_session):
     r = create_client.post("/auth/token", data={"username":"demo","password":"demo-pass-123"})
     old = r.cookies["refresh_token"]
     r2 = create_client.post("/auth/refresh")                 # rotates, sets new cookie
     assert r2.status_code == 200 and r2.cookies["refresh_token"] != old
+    current = r2.cookies["refresh_token"]
     create_client.cookies.clear()
     create_client.cookies.set("refresh_token", old)          # replay
     assert create_client.post("/auth/refresh").status_code == 401
+    # Ruling R10: reuse revokes the WHOLE family — the still-current token
+    # minted by the rotation must be dead too, not just the replayed row.
+    current_revoked = engine_session.scalar(
+        select(RefreshToken.revoked_at).where(
+            RefreshToken.token_hash == hashlib.sha256(current.encode()).hexdigest()
+        )
+    )
+    assert current_revoked is not None, "family revocation must reach the current token"

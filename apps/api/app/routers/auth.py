@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -88,9 +88,10 @@ def refresh(
 
     Lookup is by SHA-256 hash of the cookie value. A token already used or
     revoked means it was replayed (stolen cookie / second use after rotation):
-    revoke that row too and answer 401. On success the old row is marked used
-    and a brand-new refresh token (7d) plus a fresh access token (15min) are
-    set as cookies.
+    the whole family — every refresh token for that user — is revoked and the
+    request answered 401, so a rotated-away token an attacker may hold dies
+    too. On success the old row is marked used and a brand-new refresh token
+    (7d) plus a fresh access token (15min) are set as cookies.
     """
     now = datetime.now(timezone.utc)
     raw = request.cookies.get("refresh_token")
@@ -104,10 +105,18 @@ def refresh(
     if row is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
     if row.used_at is not None or row.revoked_at is not None:
-        # Reuse detection: this token was already consumed or revoked.
-        if row.revoked_at is None:
-            row.revoked_at = now
-            session.commit()
+        # Reuse detection (R10): the presented token is spent, so every
+        # refresh token for this user is suspect — revoke the whole family
+        # (no family column; user_uuid scopes it), then reject.
+        session.execute(
+            update(RefreshToken)
+            .where(
+                RefreshToken.user_uuid == row.user_uuid,
+                RefreshToken.revoked_at.is_(None),
+            )
+            .values(revoked_at=now)
+        )
+        session.commit()
         raise HTTPException(status_code=401, detail="Not authenticated")
     if row.expires_at <= now:
         raise HTTPException(status_code=401, detail="Not authenticated")
