@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { apiFetch } from "../lib/api";
+import { searchVector } from "../lib/api";
 import type { SearchResult } from "../lib/types";
 
 export interface SearchBarProps {
@@ -32,15 +32,7 @@ export default function SearchBar({
     onSearchStart();
     setSubmitting(true);
     try {
-      const data = await apiFetch<{ results: SearchResult[] }>(
-        "/api/search/vector",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query }),
-        },
-      );
-      onResults(data.results);
+      onResults(await searchVector(query));
     } catch (error) {
       onError(error);
     } finally {

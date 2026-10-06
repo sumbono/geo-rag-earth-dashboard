@@ -1,3 +1,5 @@
+import type { SearchResult } from "./types";
+
 /**
  * Thin fetch wrapper for the proxied `/api/*` backend.
  *
@@ -59,4 +61,21 @@ export async function apiFetch<T>(
     throw new ApiError(response.status, extractMessage(body));
   }
   return body as T;
+}
+
+/**
+ * One ranked vector search (`POST /api/search/vector`) — shared by the
+ * SearchBar submit and the empty state's suggestion clicks so a suggestion
+ * runs exactly the same single POST a manual search does.
+ */
+export async function searchVector(query: string): Promise<SearchResult[]> {
+  const data = await apiFetch<{ results: SearchResult[] }>(
+    "/api/search/vector",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query }),
+    },
+  );
+  return data.results;
 }

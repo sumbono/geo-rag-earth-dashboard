@@ -1,25 +1,29 @@
 "use client";
 
 import { useState } from "react";
+import DetailPanel from "../../components/DetailPanel";
+import EmptyState from "../../components/EmptyState";
 import Map from "../../components/Map";
 import ResultsPanel from "../../components/ResultsPanel";
 import SearchBar from "../../components/SearchBar";
-import { ApiError } from "../../lib/api";
+import { ApiError, searchVector } from "../../lib/api";
 import type { SearchResult } from "../../lib/types";
 
 /**
- * Authenticated dashboard (Task 17): SearchBar runs vector search through
- * `apiFetch`, results flow into the Map (score-colored markers, fly-to-first)
- * and the ResultsPanel list. Picking a row or marker selects the hit — the
- * richer empty/detail states belong to Task 18.
+ * Authenticated dashboard: SearchBar runs vector search, results flow into
+ * the Map and ResultsPanel; picking a row or marker opens the DetailPanel.
+ * After a search returns nothing the EmptyState offers example queries —
+ * before any search the page stays blank (`searched` gate).
  */
 export default function DashboardPage() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [searched, setSearched] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function handleSearchStart() {
+    setSearched(true);
     setLoading(true);
     setError(null);
   }
@@ -37,6 +41,21 @@ export default function DashboardPage() {
     );
     setLoading(false);
   }
+
+  /** EmptyState suggestion → same single POST as a manual search. */
+  async function handleSuggest(query: string) {
+    handleSearchStart();
+    try {
+      handleResults(await searchVector(query));
+    } catch (err) {
+      handleError(err);
+    }
+  }
+
+  const selectedTile =
+    selectedId === null
+      ? null
+      : (results.find((result) => result.id === selectedId) ?? null);
 
   return (
     <main
@@ -67,12 +86,24 @@ export default function DashboardPage() {
         }}
       >
         <Map results={results} onPick={setSelectedId} />
-        <ResultsPanel
-          results={results}
-          selectedId={selectedId}
-          onPick={setSelectedId}
-        />
+        {results.length > 0 ? (
+          <ResultsPanel
+            results={results}
+            selectedId={selectedId}
+            onPick={setSelectedId}
+          />
+        ) : searched ? (
+          <EmptyState onSuggest={handleSuggest} />
+        ) : null}
       </div>
+      {selectedTile !== null && (
+        <DetailPanel
+          key={selectedTile.id}
+          tile={selectedTile}
+          results={results}
+          onClose={() => setSelectedId(null)}
+        />
+      )}
     </main>
   );
 }

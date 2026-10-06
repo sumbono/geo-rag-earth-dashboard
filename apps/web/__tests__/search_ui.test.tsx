@@ -184,14 +184,18 @@ describe("dashboard search UI", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("shows a simple empty state when no results come back", async () => {
+  it("replaces the plain placeholder with the designed empty state after a search", async () => {
     stubFetch(200, { results: [] });
     render(<DashboardPage />);
 
-    expect(screen.getByText("No results")).toBeInTheDocument();
+    // First visit — nothing yet, not even the empty state (Task 18 gate).
+    expect(screen.queryByText("No results")).not.toBeInTheDocument();
+
     submitQuery("water");
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    expect(screen.getByText("No results")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "turquoise coastal water" }),
+    ).toBeInTheDocument();
   });
 });
 
