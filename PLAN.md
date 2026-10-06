@@ -1,6 +1,6 @@
 # PLAN.md — Geo-RAG Earth Dashboard
 
-**Design spec** · 2026-10-06 · Status: *awaiting user review*
+**Design spec** · 2026-10-06 · Status: *revised after triple-pass verification; awaiting go/no-go*
 **Author:** Sumbono (with Claude) · **Path:** Architectural (spec stage)
 
 ---
@@ -43,12 +43,27 @@ ingestion, full-resolution imagery storage, multi-region coverage, mobile app.
 | # | Decision | Choice | Rationale |
 |---|---|---|---|
 | D1 | Architecture | **Approach 1**: Next.js + FastAPI + offline ETL, one compose stack | Showcases both stacks (résumé's Python + Role A's TS/React) |
-| D2 | Map stack | **MapLibre GL + free tiles** | No account/token; repo self-contained for recruiters |
+| D2 | Map stack | **MapLibre GL + ESRI World Imagery raster** (default, no API key, attribution shown) + OSM streets toggle | No account/token; repo self-contained for recruiters; satellite basemap fits the domain (MapLibre demo tiles have no imagery) |
 | D3 | Auth | **Visible login page**: public `/` + `/login`, JWT-gated `/dashboard` and all data APIs; demo creds in README | Security must be *seeable*; avoids bounce at a hard wall |
 | D4 | Data scope | Saudi Red Sea coast, 512px RGB+NIR chips, low-thousands of rows | CPU-precomputable on this machine; honest, bounded |
 | D5 | Message queue | **None** — telemetry via API → Postgres | Resume already proves Kafka; adding it here is ops weight without new signal |
 | D6 | Deployment | Coolify stack on this machine, host `geo.sumbono.dev` | Reuses existing Traefik/Let's Encrypt; matches "You Build It You Run It" |
 | D7 | Credentials | Cloudflare: `/home/bono/documents/cloudflare.txt` · Coolify API: `/home/bono/documents/coolify-api-token.txt` | Located 2026-10-06; never committed to repo; `.env.example` only |
+| D8 | Imagery source | **Element84 Earth Search STAC API v1** (`earth-search.aws.element84.com/v1`, collection `sentinel-2-l2a`) | Verified live 2026-10-06: no auth, no requester-pays marker; Copernicus bulk API needs registration and lost |
+| D9 | Embedding model | **RemoteCLIP ViT-B/32** via OpenCLIP + `hf_hub_download("chendelong/RemoteCLIP", ...)` | Official weights verified on Hugging Face; RS-domain model is a better story than vanilla CLIP; 512-dim output |
+
+**Rejected alternatives (with reasons):**
+
+| Alternative | Why rejected |
+|---|---|
+| Next.js full-stack (API routes only) | Hides the résumé's strongest stack (Python/FastAPI); ETL needs Python anyway → two runtimes regardless |
+| FastAPI + vanilla-JS map frontend | Fails Role A's core requirement: modern TypeScript/React signal |
+| Mapbox GL JS | Requires account + token; repo not self-contained for recruiters running it locally |
+| Leaflet + OSM raster | Lighter, but reads dated for a "modern frontend" showcase |
+| MapLibre demo tiles | No satellite imagery — unusable for an Earth-observation app |
+| Copernicus Data Space download API | Requires account registration; breaks the 3-command quickstart spirit |
+| Kafka/Redis/Celery in the stack | Resume already proves them; ops weight with no new signal (telemetry is a seeded demo) |
+| Real instrument ingestion | Out of scope; simulated telemetry suffices for the Role B story |
 
 **Machine facts (verified):** Coolify 4.3.23 healthy; Traefik v3 on 80/443 with
 Let's Encrypt; portfolio `sumbono.dev` already served here; 8 vCPU, 15 GB RAM,
@@ -118,20 +133,34 @@ Browser ──HTTPS──▶ Traefik (existing, :80/:443, Let's Encrypt)
 
 ## 5. Data Flow & Search Pipeline
 
-**Phase A — Offline ingestion (one-time, hours on 8-core CPU):**
+**Phase A — Offline ingestion (one-time; download dominates wall time, CPU
+embedding ≈ 10 min for ~3k chips):**
 
 ```
-Sentinel-2 open data (AWS S3 / Copernicus)
-  → download_sentinel2.py   # bbox = Saudi Red Sea coast (~1,000–3,000 km²)
-  → extract_chips.py        # 512px RGB+NIR chips; per-chip bbox polygon
-  → embed_remoteclip.py     # RemoteCLIP ViT-B/32 batched CPU inference
-  → postgres `tiles`        # id, bbox(Polygon), embedding(vector,512),
-                            # thumb path, captured_at
-  → postgres `telemetry`    # synthetic buoy rows from seed_telemetry.py
+Earth Search STAC (verified 2026-10-06; no auth)
+  → download_sentinel2.py   # STAC search, bbox = Saudi Red Sea coast
+                            # (~1,000–3,000 km²); scene assets to local cache
+  → extract_chips.py        # per scene: 512×512 px windows, 128 px stride
+                            # (25% overlap); bbox per chip derived from scene
+                            # geotransform; RGB+NIR bands
+  → embed_remoteclip.py     # resize to 224×224 (model input), RemoteCLIP
+                            # ViT-B/32 batched CPU inference
+  → postgres (see data model below)
+  → seed_telemetry.py       # synthetic buoy/sensor timeseries
 ```
 
 ETL is **resumable and idempotent** (upsert by chip id; skips chips already
 embedded), so an interrupted run costs nothing.
+
+**Data model (all timestamps `timestamptz`, UTC everywhere — authoritative
+clock is the source scene metadata / ingest time, not the browser):**
+
+| Table | PK / key | Columns | Id space |
+|---|---|---|---|
+| `users` | `uuid` | username (unique), password_hash (bcrypt), created_at | uuid v4; **`sub` of every JWT = `users.uuid`** |
+| `refresh_tokens` | `uuid` | user_uuid FK, token_hash (SHA-256 of opaque token), expires_at, used_at, revoked_at | uuid v4; raw token never stored |
+| `tiles` | `uuid` | bbox (Polygon, PostGIS SRID 4326), embedding (vector, 512), thumb_path, captured_at (from scene metadata) | uuid v4 |
+| `telemetry` | `(buoy_id text, ts timestamptz)` | value double, unit text; **no tokens/secrets ever stored** | composite natural key (idempotent ingest) |
 
 **Phase B — Query-time (what a recruiter sees):**
 
@@ -140,15 +169,21 @@ embedded), so an interrupted run costs nothing.
 3. `POST /search/vector` (JWT required):
    - encode query via RemoteCLIP text tower (CPU, target < 400 ms),
    - `pgvector ORDER BY embedding <=> query_vec LIMIT 12` (< 50 ms),
-   - return `{id, thumb_url, bbox, score, captured_at}`.
-4. MapLibre flies to matched bboxes; chips overlaid colored by score.
-5. Click chip → detail panel: larger thumb, metadata, D3 score chart.
+   - return `{id, thumb_url, bbox, score, captured_at}`; `thumb_url` →
+     `GET /api/thumbs/{tile_id}` (JPEG on disk, JWT-gated; same-origin
+     cookie is sent with `<img>` requests).
+4. MapLibre flies to matched bboxes; chips overlaid colored by score
+   (basemap: ESRI World Imagery, attribution shown).
+5. Click chip → detail panel: larger thumb, metadata, and a **D3 bar chart
+   of all returned results' scores with the selected chip highlighted**.
 6. Draw bbox on map → `POST /search/bbox` (PostGIS `ST_Intersects`);
    results merge vector score with spatial filter.
 7. 3D tab (Three.js): chips as extruded point-cloud tiles on a Red Sea
    segment, colored by embedding similarity.
-8. Telemetry panel: simulated buoy stream → D3 timeseries chart
-   (`seed_telemetry.py` data; SSE stream in dev).
+8. Telemetry panel: D3 timeseries chart fed by
+   `GET /api/telemetry/query` (seeded data, default last 24 h, max 5,000
+   points); optional SSE live stream is a dev-only extra, not a demo
+   requirement.
 
 **Latency budget** (publish in `docs/benchmarks.md`):
 
@@ -164,15 +199,22 @@ embedded), so an interrupted run costs nothing.
 ## 6. Security Design
 
 - **AuthN:** OAuth2 password flow → short-lived JWT access (15 min) in
-  httpOnly, SameSite=Strict cookie + rotating refresh token (7 d), httpOnly.
-  `Depends(verify_jwt)` on every `/search/*` and `/telemetry/*` route;
-  missing/invalid/expired → `401 {"detail": ...}`; web redirects to `/login`.
+  httpOnly, SameSite=Strict cookie + rotating refresh token (7 d, httpOnly;
+  **opaque token stored hashed in `refresh_tokens`, rotated on use,
+  revocable**). `Depends(verify_jwt)` on every `/search/*` and `/telemetry/*`
+  route; `verify_jwt` validates signature/expiry **and that `sub`
+  (`users.uuid`) still exists**; missing/invalid/expired/deleted-user →
+  `401 {"detail": ...}`; web redirects to `/login`.
 - **Seed user:** bcrypt hash from env (`DEMO_USER`, `DEMO_PASSWORD`), created
   by first-boot script if absent. No plaintext secrets in the repo.
 - **Transport:** TLS via Traefik/Let's Encrypt; api on internal network only.
-- **Hardening checklist:** CORS locked to `geo.sumbono.dev`; login rate limit
-  (5/min/IP, slowapi); parameterized SQL (SQLAlchemy); Next.js security
-  headers (CSP, X-Frame-Options); real `.env` gitignored, `.env.example` committed.
+- **Hardening checklist:** CORS locked to `geo.sumbono.dev`; rate limits —
+  `POST /api/auth/token` and `/api/auth/refresh` 5/min/IP (slowapi), other
+  API routes 60/min/IP; telemetry ingest body capped at **64 KB JSON**;
+  telemetry query default window **last 24 h, max 5,000 points**; search
+  `LIMIT` fixed at **12**; parameterized SQL (SQLAlchemy); Next.js security
+  headers (CSP, X-Frame-Options); real `.env` gitignored, `.env.example`
+  committed.
 - **Showcase artifacts:** README screenshots of a 401 response, JWT decode
   flow diagram, rate-limited login rejection.
 
@@ -183,8 +225,11 @@ embedded), so an interrupted run costs nothing.
 | `/` landing | Public |
 | `/login` | Public |
 | `/dashboard` + map/3D/charts | JWT required |
-| `/api/search/*`, `/api/telemetry/*` | JWT required (401 otherwise) |
-| `GET /health` | Public (Coolify healthcheck) |
+| `POST /api/auth/token`, `POST /api/auth/refresh` | Public, rate-limited 5/min/IP |
+| `GET /api/search/*`, `POST /api/search/*`, `/api/telemetry/query` | JWT required (401 otherwise) |
+| `POST /api/telemetry/ingest` | JWT required (dev/demo tooling) |
+| `GET /api/thumbs/{tile_id}` | JWT required (cookie sent by `<img>`) |
+| `GET /api/health` | Public (Coolify healthcheck) |
 
 ---
 
@@ -197,16 +242,20 @@ embedded), so an interrupted run costs nothing.
 | api down / unhealthy | Coolify healthcheck on `/health` → auto-restart; web shows friendly "API unreachable" state |
 | No search results | empty-state UI with query suggestions; never a blank map |
 | JWT expired mid-session | silent refresh via refresh cookie; hard redirect to `/login` if refresh fails |
+| JWT valid but user row deleted | `verify_jwt` returns 401 → redirect to `/login`; first-boot script recreates seed user |
 | Telemetry client disconnects | SSE handler cleans up; ingest idempotent on `(buoy_id, ts)` |
 
 ---
 
 ## 8. Testing Strategy
 
-- **api (pytest + httpx):** JWT issue/verify/expiry units; vector ranking
-  against a 50-row fixture DB with known embeddings (assert nearest-neighbor
-  order); PostGIS `ST_Intersects` geometry fixtures; authz sweep — every
-  protected route unauthenticated → 401.
+- **api (pytest + httpx):** JWT issue/verify/expiry units; **refresh-token
+  rotation + revocation test** (reuse of a consumed token → 401); **rate-limit
+  test** (6th login attempt in a minute → 429); vector ranking against a
+  50-row fixture DB with known embeddings (assert nearest-neighbor order);
+  PostGIS `ST_Intersects` geometry fixtures; **telemetry ingest idempotency
+  (same `(buoy_id, ts)` twice → one row)**; authz sweep — every protected
+  route unauthenticated → 401.
 - **web (Vitest + RTL):** auth-guard redirect, result rendering, empty
   states. One Playwright e2e: login → search → chip click → bbox draw.
 - **etl:** golden-file test — small fixture TIFF → chip extractor bbox/shape
@@ -247,8 +296,12 @@ embedded), so an interrupted run costs nothing.
 
 ## 11. Open Risks
 
-- **Sentinel-2 access rate/limits** during download → mitigate with batch
-  resumes, off-peak runs, coverage-manifest honesty.
+- **Sentinel-2 access**: Earth Search STAC is auth-free (verified), but the
+  underlying S3 asset layer could be requester-pays → **watch at M2**: the
+  one-scene download smoke test catches it immediately; fallback is a second
+  open mirror or a pre-seeded chip dump shipped with the repo.
+- **Sentinel-2 cloud cover** over the Red Sea → scene filter (≤ 20% cloud)
+  recorded in the coverage manifest; honest README note.
 - **CPU text-encode latency** may exceed 400 ms under load → mitigate with
   ONNX-quantized text tower or query-embedding cache if measurements demand it.
 - **DNS propagation** for `geo.sumbono.dev` → verify record before M6.
