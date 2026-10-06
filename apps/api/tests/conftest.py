@@ -53,6 +53,7 @@ def geo_test_ready(settings):
     Extensions are required because CREATE DATABASE clones template1, which has
     no extensions — the initdb SQL only ran against the dev `geo` database.
     """
+    assert "geo_test" in settings.database_url, f"tests must target geo_test, got {settings.database_url}"
     _create_geo_test()
     engine = sa.create_engine(settings.database_url)
     with engine.begin() as conn:
