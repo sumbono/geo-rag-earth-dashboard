@@ -63,8 +63,7 @@ def test_verify_jwt_accepts_valid_session(create_client):
     """Counterpart to the 401 cases: a real login must reach a protected route."""
     login(create_client)
     r = create_client.get("/telemetry/query")
-    assert r.status_code == 200
-    assert r.json() == {"stub": True}
+    assert r.status_code == 200  # durable auth contract; shape is Task 10's
 
 
 @pytest.mark.db
