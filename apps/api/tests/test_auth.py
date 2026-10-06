@@ -61,3 +61,14 @@ def test_verify_jwt_accepts_valid_session(create_client):
     r = create_client.get("/telemetry/query")
     assert r.status_code == 200
     assert r.json() == {"stub": True}
+
+
+@pytest.mark.db
+def test_refresh_rotates_and_old_token_rejected(create_client):
+    r = create_client.post("/auth/token", data={"username":"demo","password":"demo-pass-123"})
+    old = r.cookies["refresh_token"]
+    r2 = create_client.post("/auth/refresh")                 # rotates, sets new cookie
+    assert r2.status_code == 200 and r2.cookies["refresh_token"] != old
+    create_client.cookies.clear()
+    create_client.cookies.set("refresh_token", old)          # replay
+    assert create_client.post("/auth/refresh").status_code == 401

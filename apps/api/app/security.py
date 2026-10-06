@@ -1,4 +1,6 @@
-"""Password hashing, JWT minting, the verify_jwt dependency, and the demo-user seed."""
+"""Password hashing, JWT/refresh-token minting, the verify_jwt dependency, and the demo-user seed."""
+import hashlib
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -23,6 +25,12 @@ def verify_password(pw: str, h: str) -> bool:
 def create_access_token(sub: str, settings: Settings) -> str:
     exp = datetime.now(timezone.utc) + timedelta(minutes=15)
     return jwt.encode({"sub": sub, "exp": exp}, settings.jwt_secret, algorithm="HS256")
+
+def mint_refresh_token() -> tuple[str, str]:
+    """A fresh one-time opaque refresh token: (raw value for the cookie,
+    SHA-256 hex digest — the only form stored in refresh_tokens.token_hash)."""
+    raw = secrets.token_urlsafe(32)
+    return raw, hashlib.sha256(raw.encode()).hexdigest()
 
 def verify_jwt(
     request: Request,
