@@ -51,7 +51,7 @@ ingestion, full-resolution imagery storage, multi-region coverage, mobile app.
 
 | Alternative | Why rejected |
 |---|---|
-| Next.js full-stack (API routes only) | Hides the résumé's strongest stack (Python/FastAPI); ETL needs Python anyway → two runtimes regardless |
+| Next.js full-stack (API routes only) | Hides the stronger story here (Python/FastAPI backend); ETL needs Python anyway → two runtimes regardless |
 | FastAPI + vanilla-JS map frontend | Misses the modern TypeScript/React frontend this project exists to demonstrate |
 | Mapbox GL JS | Requires account + token; repo not self-contained for recruiters running it locally |
 | Leaflet + OSM raster | Lighter, but reads dated for a "modern frontend" showcase |

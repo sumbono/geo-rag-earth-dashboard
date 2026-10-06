@@ -846,7 +846,7 @@ def test_one_scene_downloads(tmp_path):
 **Files:**
 - Create: `README.md`, `docs/demo.gif` (Playwright video → ffmpeg), `apps/web/e2e/recording.spec.ts`
 
-**README sections (content, not placeholders):** headline + badges (CI); architecture image; 3-command quickstart (`git clone … && cp .env.example .env && docker compose up`); demo credentials line `demo` / value of `DEMO_PASSWORD` (dev default `demo-pass-123`); ETL rerun instructions; security notes (JWT flow summary + 401 example); benchmark table link. (Application-specific mapping — e.g. JD bullets ↔ repo evidence — lives in private notes, never in the README or repo.)
+**README sections (content, not placeholders):** headline + badges (CI); architecture image; 3-command quickstart (`git clone … && cp .env.example .env && docker compose up`); demo credentials line `demo` / value of `DEMO_PASSWORD` (dev default `demo-pass-123`); ETL rerun instructions; security notes (JWT flow summary + 401 example); benchmark table link.
 
 - [ ] **Step 1:** record e2e with `video: "on"` → `ffmpeg -i video.webm -vf "fps=10,scale=800:-1" docs/demo.gif`.
 - [ ] **Step 2:** write README per sections; verify quickstart on a clean clone in a temp dir (`docker compose up` from scratch, ≤10 min, no manual steps).
