@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from app.config import Settings
 from app.init_db import init_db
 from app.rate_limit import install_rate_limit
-from app.routers import auth, health
+from app.routers import auth, health, search, telemetry, thumbs
 
 def create_app(settings: Settings) -> FastAPI:
     @asynccontextmanager
@@ -16,4 +16,7 @@ def create_app(settings: Settings) -> FastAPI:
     install_rate_limit(app, settings)
     app.include_router(health.router)
     app.include_router(auth.router)
+    app.include_router(search.router)
+    app.include_router(telemetry.router)
+    app.include_router(thumbs.router)
     return app

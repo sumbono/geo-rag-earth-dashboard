@@ -1,4 +1,8 @@
 import os
+import uuid
+from datetime import datetime, timedelta, timezone
+
+import jwt as pyjwt
 import pytest
 from fastapi.testclient import TestClient
 import sqlalchemy as sa
@@ -35,6 +39,14 @@ def limited_client(settings):
     with TestClient(create_app(s)) as c:
         yield c
     os.environ["RATE_LIMIT_ENABLED"] = "false"
+
+@pytest.fixture()
+def make_token_for_missing_user(settings) -> str:
+    """A correctly signed JWT whose sub points at no users row."""
+    return pyjwt.encode(
+        {"sub": str(uuid.uuid4()), "exp": datetime.now(timezone.utc) + timedelta(minutes=15)},
+        settings.jwt_secret, algorithm="HS256",
+    )
 
 def _create_geo_test() -> None:
     """Create the dedicated test database (never touch dev `geo`).
