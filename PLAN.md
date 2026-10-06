@@ -11,26 +11,21 @@ A bounded-region geospatial search engine that answers natural-language queries
 against Sentinel-2 satellite imagery of the Saudi Arabian Red Sea coast with
 sub-second latency, showcased as a deployed, runnable portfolio project.
 
-**Primary goal:** strengthen applications to two live KAUST roles:
-
-- **Role A — Full-Stack Developer: AI Interface & Security Specialist**
-  (CREST, Interfolio 169973): needs TypeScript/React, security (JWT/auth),
-  2D/3D visualization, AI/ML integration in a UI, PostgreSQL, Docker/CI-CD.
-- **Role B — Software Engineer, Marine Sciences**
-  (Red Sea Research Center / IOP Ocean Observing, Interfolio 93983): needs a
-  web app for exploring/sharing geospatial scientific data, telemetry/data
-  streams into a database, GIS interfaces, full SDLC ownership.
+**Primary goal:** a portfolio-quality demonstration of full-stack geospatial
+AI engineering: modern TypeScript/React frontend, demonstrable JWT security,
+2D/3D scientific visualization, and a Python/FastAPI + pgvector/PostGIS
+backend — deployed and runnable, not just a code dump.
 
 **Success criteria:**
 
 1. Live at `geo.sumbono.dev` on this machine (Coolify + Traefik), publicly reachable.
-2. Every Role A "Technical Skills" bullet is demonstrable in the repo:
-   React/Next.js + TypeScript, JWT auth (login page + 401s), MapLibre map UI,
-   Three.js 3D view, D3 charts, FastAPI backend, PostgreSQL/pgvector/PostGIS,
-   Docker Compose, GitHub Actions CI, benchmark numbers.
-3. Role B resonance: Red Sea domain, GIS/bbox search, simulated telemetry
-   timeseries, data-coverage honesty notes.
-4. Recruiter can go clone → `docker compose up` → login with README demo
+2. The full stack is demonstrable in the repo: React/Next.js + TypeScript,
+   JWT auth (login page + 401s), MapLibre map UI, Three.js 3D view, D3 charts,
+   FastAPI backend, PostgreSQL/pgvector/PostGIS, Docker Compose, GitHub
+   Actions CI, benchmark numbers.
+3. Domain authenticity: real Red Sea Sentinel-2 imagery, GIS/bbox search,
+   simulated telemetry timeseries, data-coverage honesty notes.
+4. A new reader can clone → `docker compose up` → login with README demo
    credentials → search in under 10 minutes.
 
 **Non-goals (YAGNI):** user registration, Kafka/Redis/Celery, real instrument
@@ -42,7 +37,7 @@ ingestion, full-resolution imagery storage, multi-region coverage, mobile app.
 
 | # | Decision | Choice | Rationale |
 |---|---|---|---|
-| D1 | Architecture | **Approach 1**: Next.js + FastAPI + offline ETL, one compose stack | Showcases both stacks (résumé's Python + Role A's TS/React) |
+| D1 | Architecture | **Approach 1**: Next.js + FastAPI + offline ETL, one compose stack | Showcases both stacks (Python backend + TypeScript/React frontend) |
 | D2 | Map stack | **MapLibre GL + ESRI World Imagery raster** (default, no API key, attribution shown) + OSM streets toggle | No account/token; repo self-contained for recruiters; satellite basemap fits the domain (MapLibre demo tiles have no imagery) |
 | D3 | Auth | **Visible login page**: public `/` + `/login`, JWT-gated `/dashboard` and all data APIs; demo creds in README | Security must be *seeable*; avoids bounce at a hard wall |
 | D4 | Data scope | Saudi Red Sea coast, 512px RGB+NIR chips, low-thousands of rows | CPU-precomputable on this machine; honest, bounded |
@@ -57,13 +52,13 @@ ingestion, full-resolution imagery storage, multi-region coverage, mobile app.
 | Alternative | Why rejected |
 |---|---|
 | Next.js full-stack (API routes only) | Hides the résumé's strongest stack (Python/FastAPI); ETL needs Python anyway → two runtimes regardless |
-| FastAPI + vanilla-JS map frontend | Fails Role A's core requirement: modern TypeScript/React signal |
+| FastAPI + vanilla-JS map frontend | Misses the modern TypeScript/React frontend this project exists to demonstrate |
 | Mapbox GL JS | Requires account + token; repo not self-contained for recruiters running it locally |
 | Leaflet + OSM raster | Lighter, but reads dated for a "modern frontend" showcase |
 | MapLibre demo tiles | No satellite imagery — unusable for an Earth-observation app |
 | Copernicus Data Space download API | Requires account registration; breaks the 3-command quickstart spirit |
 | Kafka/Redis/Celery in the stack | Resume already proves them; ops weight with no new signal (telemetry is a seeded demo) |
-| Real instrument ingestion | Out of scope; simulated telemetry suffices for the Role B story |
+| Real instrument ingestion | Out of scope; simulated telemetry suffices for the domain story |
 
 **Machine facts (verified):** Coolify 4.3.23 healthy; Traefik v3 on 80/443 with
 Let's Encrypt; portfolio `sumbono.dev` already served here; 8 vCPU, 15 GB RAM,
@@ -98,8 +93,8 @@ geo-rag-earth-dashboard/          ← this repo (/home/bono/portfolio/geo-rag-ea
 │   ├── embed_remoteclip.py       #   RemoteCLIP ViT-B/32 CPU batches → pgvector
 │   └── seed_telemetry.py         #   synthetic buoy/sensor timeseries
 └── docs/
-    ├── architecture.png          # diagram for README / application packet
-    └── benchmarks.md             # measured latency & accuracy (Role A artifact)
+    ├── architecture.png          # diagram for README
+    └── benchmarks.md             # measured latency & accuracy
 ```
 
 ---
@@ -305,5 +300,3 @@ clock is the source scene metadata / ingest time, not the browser):**
 - **CPU text-encode latency** may exceed 400 ms under load → mitigate with
   ONNX-quantized text tower or query-embedding cache if measurements demand it.
 - **DNS propagation** for `geo.sumbono.dev` → verify record before M6.
-- **Role B staleness** (posting date 2021): user confirmed both roles live on
-  kaust.edu.sa as of 2026-10-06; re-verify before submitting.

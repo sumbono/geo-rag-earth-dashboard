@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build and deploy a natural-language geospatial search demo over Sentinel-2 imagery of the Saudi Red Sea coast (Next.js + FastAPI + pgvector/PostGIS), live at `geo.sumbono.dev`, as portfolio evidence for KAUST roles 169973 and 93983.
+**Goal:** Build and deploy a natural-language geospatial search demo over Sentinel-2 imagery of the Saudi Red Sea coast (Next.js + FastAPI + pgvector/PostGIS), live at `geo.sumbono.dev`, as a portfolio-quality demonstration of full-stack geospatial AI engineering.
 
 **Architecture:** Three-part monorepo: `apps/web` (Next.js 15, public landing + login + JWT-gated dashboard with MapLibre/Three.js/D3), `apps/api` (FastAPI: JWT auth, vector + bbox search, telemetry, thumbs), `etl/` (offline: Earth Search STAC download → 512px chip extraction → RemoteCLIP embeddings → Postgres). One Postgres (PostGIS + pgvector) shared by API and ETL. Deployed as a Coolify compose stack behind the existing Traefik proxy.
 
@@ -846,7 +846,7 @@ def test_one_scene_downloads(tmp_path):
 **Files:**
 - Create: `README.md`, `docs/demo.gif` (Playwright video → ffmpeg), `apps/web/e2e/recording.spec.ts`
 
-**README sections (content, not placeholders):** headline + badges (CI); architecture image; 3-command quickstart (`git clone … && cp .env.example .env && docker compose up`); demo credentials line `demo` / value of `DEMO_PASSWORD` (dev default `demo-pass-123`); ETL rerun instructions; security notes (JWT flow summary + 401 example); benchmark table link; role-mapping table (spec §1 success criteria ↔ repo evidence) for the KAUST application.
+**README sections (content, not placeholders):** headline + badges (CI); architecture image; 3-command quickstart (`git clone … && cp .env.example .env && docker compose up`); demo credentials line `demo` / value of `DEMO_PASSWORD` (dev default `demo-pass-123`); ETL rerun instructions; security notes (JWT flow summary + 401 example); benchmark table link. (Application-specific mapping — e.g. JD bullets ↔ repo evidence — lives in private notes, never in the README or repo.)
 
 - [ ] **Step 1:** record e2e with `video: "on"` → `ffmpeg -i video.webm -vf "fps=10,scale=800:-1" docs/demo.gif`.
 - [ ] **Step 2:** write README per sections; verify quickstart on a clean clone in a temp dir (`docker compose up` from scratch, ≤10 min, no manual steps).
