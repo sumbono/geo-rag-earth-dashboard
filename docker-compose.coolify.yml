@@ -1,0 +1,100 @@
+# Production variant for Coolify (PLAN.md §9 / M6) — deploys
+# https://geo.sumbono.dev through this host's coolify-proxy (Traefik:
+# entrypoints http + https, certresolver `letsencrypt`,
+# providers.docker.exposedbydefault=false → labels opt in).
+#
+# Differences from docker-compose.yml, and why:
+#   - Secrets are REQUIRED from the environment (Coolify env vars):
+#     JWT_SECRET / REFRESH_SECRET / POSTGRES_PASSWORD use `${VAR:?…}` so a
+#     deploy without them fails at config time instead of shipping
+#     placeholders. Nothing secret is committed to this repo.
+#   - PUBLIC_ORIGIN is pinned to https://geo.sumbono.dev — the api derives
+#     its `Secure` cookie flags from it (apps/api/app/routers/auth.py:
+#     `secure = settings.public_origin.startswith("https")`).
+#   - Only `web` is reachable from outside, via Traefik labels on the
+#     shared external `coolify` network; db/api stay on the internal
+#     network — the browser only ever talks to `web` (single-origin proxy).
+#   - api carries a container healthcheck on GET /health (PLAN §9): that
+#     route is not under /api/*, so the web proxy does not expose it.
+#   - DEMO_* default to the documented public README demo login (PLAN D3);
+#     override via Coolify env to change it.
+#   - Paths are relative to this file (repo root), same as the dev compose.
+
+services:
+  db:
+    build: { context: ./deploy, dockerfile: db.Dockerfile }
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in Coolify (generate a random value)}
+      POSTGRES_DB: geo
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./deploy/initdb:/docker-entrypoint-initdb.d
+      - ./fixtures:/fixtures:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d geo"]
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build: { context: ./apps/api }
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in Coolify (generate a random value)}@db:5432/geo
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in Coolify (generate a long random value)}
+      REFRESH_SECRET: ${REFRESH_SECRET:?set REFRESH_SECRET in Coolify (generate a long random value)}
+      DEMO_USER: ${DEMO_USER:-demo}
+      DEMO_PASSWORD: ${DEMO_PASSWORD:-demo-pass-123}
+      ENCODER: ${ENCODER:-remoteclip}
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+      PUBLIC_ORIGIN: https://geo.sumbono.dev
+      THUMBS_DIR: /fixtures/thumbs
+      HF_HOME: /hf-cache
+    volumes:
+      - ./fixtures/thumbs:/fixtures/thumbs:ro
+      - hf_cache:/hf-cache   # persist RemoteCLIP weights across restarts (R15 note)
+    depends_on:
+      db: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  web:
+    build: ./apps/web
+    environment: [API_INTERNAL_URL=http://api:8000]
+    depends_on: [api]
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=coolify
+      - traefik.http.routers.geo-rag.rule=Host(`geo.sumbono.dev`)
+      - traefik.http.routers.geo-rag.entrypoints=https
+      - traefik.http.routers.geo-rag.tls=true
+      - traefik.http.routers.geo-rag.tls.certresolver=letsencrypt
+      - traefik.http.services.geo-rag.loadbalancer.server.port=3000
+      - traefik.http.routers.geo-rag-http.rule=Host(`geo.sumbono.dev`)
+      - traefik.http.routers.geo-rag-http.entrypoints=http
+      - traefik.http.middlewares.geo-rag-redirect.redirectscheme.scheme=https
+      - traefik.http.routers.geo-rag-http.middlewares=geo-rag-redirect
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - default
+      - coolify
+
+networks:
+  coolify:
+    external: true
+    name: coolify
+
+volumes:
+  pgdata:
+  hf_cache:

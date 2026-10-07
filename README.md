@@ -162,4 +162,4 @@ found → fixed → re-measured.
 
 ## Live demo
 
-**https://geo.sumbono.dev** — deploying.
+**https://geo.sumbono.dev** — live.
