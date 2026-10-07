@@ -231,9 +231,21 @@ function stubContainerSize(size: { width: number; height: number }) {
 let consoleError: ReturnType<typeof vi.spyOn>;
 let consoleWarn: ReturnType<typeof vi.spyOn>;
 
+/** Telemetry tab mounts a chart that fetches on mount (Task 21) — stub an
+ *  empty window so no real request escapes and the tab renders "No telemetry". */
+const fetchMock = vi.fn<typeof fetch>();
+
 beforeEach(() => {
   consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
   consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+  fetchMock.mockResolvedValue(
+    new Response(JSON.stringify({ points: [], count: 0 }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
 
   // Brief's jsdom stub: jsdom has no WebGL, so both the availability probe
   // and anything else calling getContext gets this controlled answer.
@@ -276,6 +288,8 @@ afterEach(() => {
   expect(errors).toEqual([]);
   expect(warns).toEqual([]);
 
+  vi.unstubAllGlobals();
+  fetchMock.mockReset();
   vi.restoreAllMocks();
   delete (window as { WebGLRenderingContext?: unknown }).WebGLRenderingContext;
 });
@@ -427,7 +441,7 @@ describe("View3D", () => {
 });
 
 describe("dashboard tabs", () => {
-  it("starts on Map, switches to 3D (canvas) and Telemetry (placeholder), and back", async () => {
+  it("starts on Map, switches to 3D (canvas) and Telemetry (chart), and back", async () => {
     render(<DashboardPage />);
 
     // Map is the default tab: the MapLibre mock is live, no WebGL canvas yet.
@@ -458,13 +472,13 @@ describe("dashboard tabs", () => {
       screen.queryByRole("button", { name: "OSM streets" }),
     ).not.toBeInTheDocument();
 
-    // Telemetry tab: Task 21's placeholder only.
+    // Telemetry tab: the Task 21 chart (stubbed fetch → empty window).
     fireEvent.click(screen.getByRole("button", { name: "Telemetry" }));
     expect(screen.getByRole("button", { name: "Telemetry" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
-    expect(screen.getByText("Telemetry", { selector: "div" })).toBeInTheDocument();
+    expect(await screen.findByText("No telemetry")).toBeInTheDocument();
     expect(document.querySelector("canvas")).toBeNull();
     expect(
       screen.queryByRole("button", { name: "OSM streets" }),

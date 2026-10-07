@@ -10,6 +10,7 @@ import EmptyState from "../../components/EmptyState";
 import MapView, { type MapHandle } from "../../components/Map";
 import ResultsPanel from "../../components/ResultsPanel";
 import SearchBar from "../../components/SearchBar";
+import TelemetryChart from "../../components/TelemetryChart";
 import { ApiError, searchVector } from "../../lib/api";
 import type { SearchResult } from "../../lib/types";
 
@@ -18,7 +19,7 @@ import type { SearchResult } from "../../lib/types";
 const View3D = dynamic(() => import("../../components/View3D"), { ssr: false });
 
 /** Main-viewport tabs: the map (default), the Task 20 3D view, and the
- *  Task 21 telemetry placeholder. */
+ *  Task 21 telemetry chart. */
 type Tab = "map" | "3d" | "telemetry";
 
 const TABS: { id: Tab; label: string }[] = [
@@ -60,8 +61,9 @@ function unionByIdMax(
  *
  * Task 20: a Map | 3D | Telemetry tab bar (aria-pressed toggles) swaps the
  * main viewport — the map grid, the client-only Three.js `<View3D>` of the
- * same results, or the Telemetry placeholder Task 21 will fill in. Search,
- * bbox draw, errors and the DetailPanel live outside the tabs.
+ * same results, or the Task 21 `<TelemetryChart>` (D3 line chart of one
+ * buoy's 24h window). Search, bbox draw, errors and the DetailPanel live
+ * outside the tabs.
  */
 export default function DashboardPage() {
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -207,7 +209,7 @@ export default function DashboardPage() {
         </div>
       )}
       {tab === "3d" && <View3D results={results} />}
-      {tab === "telemetry" && <div>Telemetry</div>}
+      {tab === "telemetry" && <TelemetryChart />}
       {selectedTile !== null && (
         <DetailPanel
           key={selectedTile.id}
