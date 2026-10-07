@@ -16,17 +16,10 @@ describe("landing page", () => {
     expect(links.some((a) => a.getAttribute("href") === "/login")).toBe(true);
   });
 
-  it("renders both preview slots", () => {
+  it("renders the preview slot with the walkthrough GIF (no static screenshot slot)", () => {
     render(<Page />);
-    expect(screen.getByTestId("screenshot-slot")).toBeInTheDocument();
     expect(screen.getByTestId("gif-slot")).toBeInTheDocument();
-  });
-
-  it("fills both slots with the real screenshot and GIF", () => {
-    render(<Page />);
-    expect(
-      within(screen.getByTestId("screenshot-slot")).getByRole("img"),
-    ).toHaveAttribute("src", "/screenshots/dashboard-with-results.png");
+    expect(screen.queryByTestId("screenshot-slot")).not.toBeInTheDocument();
     expect(within(screen.getByTestId("gif-slot")).getByRole("img")).toHaveAttribute(
       "src",
       "/demo.gif",

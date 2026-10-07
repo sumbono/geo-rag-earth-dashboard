@@ -1,9 +1,9 @@
 import Link from "next/link";
 
 /**
- * Public landing page (front door of the application). The preview slots
- * below carry the real assets from docs/screenshots + docs/demo.gif
- * (Task 24), mirrored into public/ so the page serves them statically.
+ * Public landing page (front door of the application). The preview slot
+ * below carries the walkthrough GIF (docs/demo.gif, Task 24), mirrored into
+ * public/ so the page serves it statically.
  */
 export default function Home() {
   return (
@@ -64,22 +64,6 @@ export default function Home() {
       </section>
 
       <section className="preview" aria-label="Product preview">
-        <figure
-          className="preview__slot"
-          data-testid="screenshot-slot"
-        >
-          <img
-            className="preview__img"
-            src="/screenshots/dashboard-with-results.png"
-            alt="Dashboard after a search: ranked tile results with scores and capture dates beside the satellite basemap of the Red Sea coast"
-            width={1440}
-            height={900}
-            loading="lazy"
-          />
-          <figcaption className="preview__label">
-            Dashboard screenshot
-          </figcaption>
-        </figure>
         <figure
           className="preview__slot preview__slot--wide"
           data-testid="gif-slot"

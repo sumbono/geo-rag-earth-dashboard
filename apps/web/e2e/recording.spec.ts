@@ -159,12 +159,8 @@ test("screenshot: landing page with filled preview slots", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "Geo-RAG Earth Dashboard" }),
   ).toBeVisible();
-  // The slot images are local static assets — wait for them so the shot
+  // The slot image is a local static asset — wait for it so the shot
   // never captures a half-painted preview.
-  await page
-    .getByTestId("screenshot-slot")
-    .locator("img")
-    .waitFor({ state: "visible" });
   await page
     .getByTestId("gif-slot")
     .locator("img")
