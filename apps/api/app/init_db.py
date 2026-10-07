@@ -1,6 +1,8 @@
 from sqlalchemy import create_engine, text
-from app.db import Base
+
 import app.models  # noqa: F401
+from app.db import Base
+
 
 def init_db(url: str) -> None:
     engine = create_engine(url)

@@ -1,9 +1,9 @@
 import hashlib
 
 import pytest
+from app.models import RefreshToken
 from sqlalchemy import select
 
-from app.models import RefreshToken
 from tests.helpers import login
 
 

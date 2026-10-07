@@ -77,9 +77,12 @@ _API_ROOT = Path(__file__).resolve().parent.parent / "apps" / "api"
 if str(_API_ROOT) not in sys.path:
     sys.path.insert(0, str(_API_ROOT))
 
-from app.encoder import get_encoder  # noqa: E402  (sys.path insert above)
-from app.models import Tile  # noqa: E402  (Task 2 schema — the rows we write)
-from extract_chips import to_uint8  # noqa: E402  (the preview's stretch, reused)
+# Late imports (after the sys.path insert above) — E402 by design; plain
+# comments because ruff's default set does not enable E402 (its fixer drops
+# suppression comments for rules that are not enabled).
+from app.encoder import get_encoder
+from app.models import Tile
+from extract_chips import to_uint8
 
 logger = logging.getLogger("embed_remoteclip")
 

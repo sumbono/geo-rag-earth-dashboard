@@ -1,6 +1,8 @@
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+
 from app.config import Settings
 from app.init_db import init_db
 from app.rate_limit import install_rate_limit

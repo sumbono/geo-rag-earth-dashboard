@@ -12,10 +12,10 @@ from datetime import datetime, timezone
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy import func, select
-
 from app.encoder import FakeEncoder
 from app.models import Tile
+from sqlalchemy import func, select
+
 from tests.helpers import login
 
 BBOX_TILES_0_9 = [[34.99, 19.99], [35.095, 20.02]]      # 10 tiles, coral (i=7) inside

@@ -6,8 +6,8 @@ from uuid import uuid4
 
 import jwt as pyjwt
 import pytest
-from fastapi.testclient import TestClient
 import sqlalchemy as sa
+from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 
 os.environ.setdefault("JWT_SECRET", "test-jwt-secret-0123456789abcdef0123456789")  # >=32 bytes: PyJWT warns on short HMAC keys
@@ -19,7 +19,10 @@ os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
 os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://postgres:postgres@localhost:5432/geo_test")
 # Tests use the dedicated `geo_test` database — NEVER the dev/prod `geo` db.
 
-from app.encoder import FakeEncoder  # noqa: E402  (after env defaults, like every app import here)
+# Imported after the env defaults above (deliberate late import — E402 by
+# design; a plain comment because ruff's default set does not enable E402).
+from app.encoder import FakeEncoder
+
 
 @pytest.fixture(scope="session")
 def settings():
@@ -93,8 +96,8 @@ def engine_session(settings):
     # Ensure the dedicated test database exists (never touch dev `geo`).
     _create_geo_test()
     engine = sa.create_engine(settings.database_url)
+    import app.models  # noqa: F401 — registers mappers (side-effect import)
     from app.db import Base
-    import app.models  # register mappers
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     session = Session()

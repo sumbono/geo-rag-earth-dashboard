@@ -122,7 +122,10 @@ def _run_seed_script(env: dict, timeout: int = 120) -> subprocess.CompletedProce
         "sh", "-c",
         f"{exports} sh /docker-entrypoint-initdb.d/02-seed.sh",
     ]
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    # check=False: the tests assert on returncode/stderr themselves.
+    return subprocess.run(
+        cmd, capture_output=True, text=True, timeout=timeout, check=False
+    )
 
 
 @pytest.mark.db

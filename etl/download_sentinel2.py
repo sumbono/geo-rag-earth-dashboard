@@ -105,10 +105,8 @@ def _band_asset_keys(band: str, assets: dict) -> list[str]:
     alias = BAND_ALIASES.get(band)
     keys = []
     for key in assets:
-        if key == band or key.startswith(band + "_") or key.startswith(band + "-"):
-            keys.append(key)
-        elif alias and (
-            key == alias or key.startswith(alias + "_") or key.startswith(alias + "-")
+        if key == band or key.startswith((band + "_", band + "-")) or alias and (
+            key == alias or key.startswith((alias + "_", alias + "-"))
         ):
             keys.append(key)
     return keys

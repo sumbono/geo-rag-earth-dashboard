@@ -1,12 +1,15 @@
 import uuid
-from uuid import UUID
 from datetime import datetime
-from sqlalchemy import String, DateTime, Float, Text, PrimaryKeyConstraint, func
-from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy.types import Uuid
+from uuid import UUID
+
 from geoalchemy2 import Geometry
 from pgvector.sqlalchemy import Vector
+from sqlalchemy import DateTime, Float, String, func
+from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.types import Uuid
+
 from app.db import Base
+
 
 class User(Base):
     __tablename__ = "users"

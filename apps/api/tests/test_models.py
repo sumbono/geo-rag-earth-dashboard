@@ -4,8 +4,9 @@ import sqlalchemy as sa
 
 @pytest.mark.db
 def test_tables_create_and_user_roundtrip(engine_session, settings):
-    from app.models import User
     import uuid as uuid_mod
+
+    from app.models import User
     s = engine_session
     u = User(id=uuid_mod.uuid4(), username="t-user", password_hash="x")
     s.add(u); s.commit()

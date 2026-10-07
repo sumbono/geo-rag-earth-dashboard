@@ -250,18 +250,17 @@ def _write_jpeg(path: Path, rgb: np.ndarray) -> None:
     """
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=NotGeoreferencedWarning)
-        with rasterio.Env(GDAL_PAM_ENABLED="NO"):
-            with rasterio.open(
-                path,
-                "w",
-                driver="JPEG",
-                width=rgb.shape[2],
-                height=rgb.shape[1],
-                count=3,
-                dtype="uint8",
-                quality=JPEG_QUALITY,
-            ) as dst:
-                dst.write(rgb)
+        with rasterio.Env(GDAL_PAM_ENABLED="NO"), rasterio.open(
+            path,
+            "w",
+            driver="JPEG",
+            width=rgb.shape[2],
+            height=rgb.shape[1],
+            count=3,
+            dtype="uint8",
+            quality=JPEG_QUALITY,
+        ) as dst:
+            dst.write(rgb)
 
 
 def _append_manifest(path: Path, records: list[dict]) -> None:

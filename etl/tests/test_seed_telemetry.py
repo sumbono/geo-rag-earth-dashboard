@@ -22,9 +22,9 @@ Run from ``etl/``::
 
     ../.venv/bin/pytest -v tests/test_seed_telemetry.py   # needs: docker compose up -d db
 """
+import sys
 from datetime import timedelta
 from pathlib import Path
-import sys
 
 import pytest
 import sqlalchemy as sa
@@ -53,8 +53,8 @@ def seed_env(monkeypatch):
     api_root = Path(__file__).resolve().parents[2] / "apps" / "api"
     if str(api_root) not in sys.path:
         sys.path.insert(0, str(api_root))
-    from app.db import Base
     import app.models  # noqa: F401 — registers mappers
+    from app.db import Base
 
     Base.metadata.create_all(engine)
     with engine.begin() as conn:

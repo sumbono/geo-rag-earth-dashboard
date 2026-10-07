@@ -18,12 +18,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 import rasterio
+from make_fixture_tif import BANDS, make_fixture_tif
 from rasterio.errors import NotGeoreferencedWarning
 from rasterio.transform import from_origin
 from rasterio.windows import Window
 from rasterio.windows import transform as window_transform
-
-from make_fixture_tif import BANDS, make_fixture_tif
 
 GOLDEN_TRANSFORM = from_origin(39.0, 22.0, 0.0001, 0.0001)
 # literal corners of window (0, 0, 512, 512) under GOLDEN_TRANSFORM
@@ -335,9 +334,8 @@ def test_unsigned_mpc_blob_url_logs_error_and_skips(tmp_path, monkeypatch, caplo
 
 
 def test_utm_scene_bbox_reprojected_to_wgs84(tmp_path):
-    from rasterio.warp import transform as warp_transform
-
     import extract_chips
+    from rasterio.warp import transform as warp_transform
 
     utm = from_origin(500000.0, 2400000.0, 10.0, 10.0)  # UTM 37N, 10 m/px
     scene = make_fixture_tif(tmp_path / "S2A_UTM", crs="EPSG:32637", transform=utm)

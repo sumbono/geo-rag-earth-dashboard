@@ -58,8 +58,8 @@ import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 
+import seed_telemetry
 import sqlalchemy as sa
-
 from download_sentinel2 import (  # local module (Task 11)
     DEFAULT_BBOX,
     DEFAULT_CLOUD_COVER,
@@ -69,7 +69,6 @@ from download_sentinel2 import (  # local module (Task 11)
 )
 from embed_remoteclip import DEFAULT_DATABASE_URL, embed_chips
 from extract_chips import extract_chips
-import seed_telemetry
 
 logger = logging.getLogger("make_fixture_dump")
 
@@ -200,7 +199,9 @@ def pg_dump_sql(database_url: str) -> bytes:
     if password:
         env["PGPASSWORD"] = password
     logger.info("dumping: %s", " ".join(argv))
-    proc = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    # check=False: returncode/stderr are inspected below with our own
+    # RuntimeError (PLW1510 made explicit; behavior unchanged).
+    proc = subprocess.run(argv, capture_output=True, env=env, check=False)
     if proc.returncode != 0:
         raise RuntimeError(
             f"pg_dump failed rc={proc.returncode}: "

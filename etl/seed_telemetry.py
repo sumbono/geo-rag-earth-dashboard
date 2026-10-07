@@ -51,7 +51,7 @@ _API_ROOT = Path(__file__).resolve().parent.parent / "apps" / "api"
 if str(_API_ROOT) not in sys.path:
     sys.path.insert(0, str(_API_ROOT))
 
-from app.models import Telemetry  # noqa: E402  (sys.path insert above)
+from app.models import Telemetry  # late import, after the sys.path insert above
 
 logger = logging.getLogger("seed_telemetry")
 
@@ -148,7 +148,7 @@ def build_rows(
     if now_utc.tzinfo is None:
         now_utc = now_utc.replace(tzinfo=timezone.utc)
     end = _grid_end(now_utc, freq_s)
-    steps = int(round(days * 86400.0 / freq_s))
+    steps = round(days * 86400.0 / freq_s)
     if steps < 1:
         raise ValueError(
             f"window too small: days={days} at freq={freq_s:g}s → 0 samples"

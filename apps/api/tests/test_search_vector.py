@@ -1,7 +1,7 @@
 import pytest
 import sqlalchemy as sa
-
 from app.models import Tile
+
 from tests.helpers import login
 
 

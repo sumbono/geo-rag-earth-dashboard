@@ -10,8 +10,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 import sqlalchemy as sa
-
 from app.models import Telemetry
+
 from tests.helpers import login
 
 

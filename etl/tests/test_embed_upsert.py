@@ -143,8 +143,8 @@ def embed_env(tmp_path, monkeypatch):
     api_root = Path(__file__).resolve().parents[2] / "apps" / "api"
     if str(api_root) not in sys.path:
         sys.path.insert(0, str(api_root))
-    from app.db import Base
     import app.models  # noqa: F401 — registers mappers
+    from app.db import Base
 
     Base.metadata.create_all(engine)
     # Clean slate: "tiles rows: T" logs the whole table count, so any leftover

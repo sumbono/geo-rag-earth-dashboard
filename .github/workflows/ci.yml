@@ -27,18 +27,20 @@ jobs:
             apps/api/requirements.txt
             apps/api/requirements-dev.txt
 
-      # Config-gated on purpose: this repo has NO ruff config yet, and an
-      # unconfigured `ruff check` would either be noise or a fake green
-      # check. The step starts running ruff for real the moment a config
-      # file exists (pyproject.toml / ruff.toml / .ruff.toml).
-      - name: ruff (config-gated)
+      # Runs UNCONDITIONALLY, pinned (Task-22 review round 1 removed the old
+      # config gate — no ruff config exists repo-wide, so the gate's notice
+      # branch always fired and ruff never linted anything).
+      # Current honest state: `ruff check .` with ruff==0.16.10 defaults exits
+      # 1 with 25 findings this repo has NOT cleared yet — 23x B008 (FastAPI
+      # `Depends(...)` default-arg idiom: needs an Annotated-style migration or
+      # a ruled config), 1x BLE001 (deliberate broad catch, spec §7 "skip,
+      # never crash"), 1x TRY004 (switching ValueError→TypeError would escape
+      # the handler that keeps malformed manifest lines from crashing). Listed
+      # in task-22-report.md for a ruling rather than silenced, per review.
+      - name: ruff
         run: |
-          if ls pyproject.toml ruff.toml .ruff.toml 2>/dev/null | grep -q .; then
-            python -m pip install --quiet ruff
-            ruff check .
-          else
-            echo "::notice title=ruff skipped::No ruff config in the repo yet (add pyproject.toml [tool.ruff] or ruff.toml) — this step then runs ruff for real. Deliberately NOT a vacuous green check."
-          fi
+          python -m pip install --quiet ruff==0.16.10
+          ruff check .
 
       - name: Install deps (apps + etl core-only, no ML)
         run: |

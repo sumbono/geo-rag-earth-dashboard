@@ -7,7 +7,6 @@ from datetime import datetime, timedelta, timezone
 import bcrypt
 import jwt
 from fastapi import Depends, HTTPException, Request
-from fastapi.security import OAuth2PasswordBearer  # imported for OpenAPI docs only
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -15,6 +14,7 @@ from app.config import Settings
 from app.db import get_db
 from app.deps import get_settings
 from app.models import User
+
 
 def hash_password(pw: str) -> str:
     return bcrypt.hashpw(pw.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
