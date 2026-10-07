@@ -1,9 +1,9 @@
 import Link from "next/link";
 
 /**
- * Public landing page (front door of the application). The /login form and
- * the auth-guarded /dashboard shell exist as of Task 16; the preview slots
- * below are filled with real screenshots/GIF in Task 24.
+ * Public landing page (front door of the application). The preview slots
+ * below carry the real assets from docs/screenshots + docs/demo.gif
+ * (Task 24), mirrored into public/ so the page serves them statically.
  */
 export default function Home() {
   return (
@@ -41,15 +41,33 @@ export default function Home() {
           className="preview__slot"
           data-testid="screenshot-slot"
         >
-          <span className="preview__label">Dashboard screenshot</span>
-          <span className="preview__hint">Preview coming soon</span>
+          <img
+            className="preview__img"
+            src="/screenshots/dashboard-with-results.png"
+            alt="Dashboard after a search: ranked tile results with scores and capture dates beside the satellite basemap of the Red Sea coast"
+            width={1440}
+            height={900}
+            loading="lazy"
+          />
+          <figcaption className="preview__label">
+            Dashboard screenshot
+          </figcaption>
         </figure>
         <figure
           className="preview__slot preview__slot--wide"
           data-testid="gif-slot"
         >
-          <span className="preview__label">Search-to-map walkthrough</span>
-          <span className="preview__hint">Demo GIF coming soon</span>
+          <img
+            className="preview__img"
+            src="/demo.gif"
+            alt="Walkthrough: log in, search for water, open a result in the detail panel, draw an area on the map, and read buoy telemetry"
+            width={800}
+            height={500}
+            loading="lazy"
+          />
+          <figcaption className="preview__label">
+            Search-to-map walkthrough
+          </figcaption>
         </figure>
       </section>
 

@@ -146,7 +146,7 @@ body {
   border-color: var(--accent);
 }
 
-/* --- preview slots (filled by Task 24) --- */
+/* --- preview slots (real screenshots/GIF, Task 24) --- */
 .preview {
   display: grid;
   grid-template-columns: 1fr;
@@ -168,6 +168,14 @@ body {
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   text-align: center;
+}
+
+.preview__img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 4px);
 }
 
 .preview__label {
