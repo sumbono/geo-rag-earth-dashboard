@@ -105,6 +105,33 @@ test("dashboard: login → search → detail → bbox draw → telemetry chart",
     .poll(() => layerFeatureCount(page, "result-markers"), { timeout: 30_000 })
     .toBeGreaterThan(0);
 
+  // ── 2b. OSM streets toggle — the APEX tile host must pass the CSP ──────
+  // The layer starts visibility:"none", so nothing fetches
+  // `https://tile.openstreetmap.org` until this toggle — the original e2e
+  // blind spot: a CSP listing only `https://*.tile.openstreetmap.org` blocks
+  // the bare apex (wildcards match subdomains, never the apex itself) and
+  // the zero-violations assert below never saw it. Click, confirm the
+  // aria-pressed state, then let EITHER the first OSM tile response OR a
+  // CSP refusal resolve the race; the definitive gate is the end-of-flow
+  // `cspViolations` assert — a regression fails it with the refusal text.
+  const osmToggle = page.getByRole("button", { name: "OSM streets" });
+  await expect(osmToggle).toHaveAttribute("aria-pressed", "false");
+  await osmToggle.click();
+  await expect(osmToggle).toHaveAttribute("aria-pressed", "true");
+  await Promise.race([
+    page
+      .waitForResponse(
+        (response) => response.url().includes("tile.openstreetmap.org"),
+        { timeout: 20_000 },
+      )
+      .catch(() => undefined), // host slow/unreachable ≠ CSP defect
+    (async () => {
+      while (cspViolations.length === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+    })(),
+  ]);
+
   // ── 3. click the first result chip → detail panel visible ───────────────
   await results.getByRole("button").first().click();
   const detail = page.getByRole("region", { name: "Tile details" });

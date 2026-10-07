@@ -27,7 +27,19 @@ describe("next.config security headers (spec §6)", () => {
     expect(csp).toContain("frame-ancestors 'self'");
     expect(csp).toContain("img-src 'self' data:");
     expect(csp).toContain("https://server.arcgisonline.com");
-    expect(csp).toContain("https://*.tile.openstreetmap.org");
+
+    // Both OSM hosts, per directive: the bare apex (Map.tsx's literal
+    // `https://tile.openstreetmap.org/...` — a CSP wildcard matches
+    // subdomains ONLY, never the apex, so the bare host must be listed)
+    // and the subdomain wildcard.
+    const imgSrc =
+      csp.split("; ").find((d) => d.startsWith("img-src")) ?? "";
+    const connectSrc =
+      csp.split("; ").find((d) => d.startsWith("connect-src")) ?? "";
+    expect(imgSrc).toContain("https://tile.openstreetmap.org");
+    expect(imgSrc).toContain("https://*.tile.openstreetmap.org");
+    expect(connectSrc).toContain("https://tile.openstreetmap.org");
+    expect(connectSrc).toContain("https://*.tile.openstreetmap.org");
     // Evidence-based exclusions: no eval anywhere in the prod bundle, and
     // frames/scripts/fonts/object sources stay locked to 'self'.
     expect(csp).not.toContain("unsafe-eval");

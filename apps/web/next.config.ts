@@ -25,7 +25,11 @@ const API_INTERNAL_URL = process.env.API_INTERNAL_URL ?? "http://localhost:8000"
  *   MapLibre's injected element styles.
  * - `img-src`/`connect-src`: same-origin app assets + the two raster tile
  *   hosts `components/Map.tsx` uses (Esri World Imagery, OSM) — MapLibre
- *   `fetch`es tiles (connect-src) before drawing them (img-src).
+ *   `fetch`es tiles (connect-src) before drawing them (img-src). BOTH the
+ *   bare apex `https://tile.openstreetmap.org` (the literal OSM_TILES host)
+ *   and the `https://*.tile.openstreetmap.org` wildcard are listed: a CSP
+ *   wildcard matches subdomains only, never the apex itself — Chromium
+ *   blocks the bare host on wildcard-only policies (final-review residual).
  * - No font hosts: the map style declares no glyphs/sprites (raster +
  *   circle/fill/line layers only), and Next self-hosts its fonts.
  * - `frame-ancestors 'self'` (plus `X-Frame-Options` for older agents),
@@ -43,8 +47,8 @@ const SECURITY_HEADERS = [
       "default-src 'self'",
       "script-src 'self' 'unsafe-inline'",
       "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: https://server.arcgisonline.com https://*.tile.openstreetmap.org",
-      "connect-src 'self' https://server.arcgisonline.com https://*.tile.openstreetmap.org",
+      "img-src 'self' data: https://server.arcgisonline.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org",
+      "connect-src 'self' https://server.arcgisonline.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org",
       "frame-ancestors 'self'",
       "object-src 'none'",
       "base-uri 'self'",
