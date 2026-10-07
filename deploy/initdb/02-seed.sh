@@ -77,4 +77,12 @@ DDL
 
 gunzip -c "$SEED_SQL" | psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-postgres}" -d "$SEED_DB"
 
+# Slide the telemetry window so it ends at restore time. The fixture dump's
+# timestamps are frozen at generation; without this, the default 24h query
+# shrinks as wall-clock time passes and fresh clones start with an empty
+# chart. tiles.captured_at is deliberately left alone — satellite capture
+# dates are historical fact.
+psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-postgres}" -d "$SEED_DB" \
+  -c "UPDATE telemetry SET ts = ts + (SELECT now() - max(ts) FROM telemetry);"
+
 echo "02-seed: restored $SEED_SQL into $SEED_DB"
