@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/sumbono/geo-rag-earth-dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/sumbono/geo-rag-earth-dashboard/actions/workflows/ci.yml)
 
+**Live demo:** https://geo.sumbono.dev · **Demo login:** `demo` / `demo-pass-123`
+
 Search Sentinel-2 satellite imagery of the Red Sea coast in plain English:
 describe what you want to see — turquoise coastal water, desert near the
 shoreline, cloud patterns — and a retrieval-augmented vision model finds the

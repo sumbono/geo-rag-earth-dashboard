@@ -32,4 +32,25 @@ describe("landing page", () => {
       "/demo.gif",
     );
   });
+
+  it("links to the GitHub repository in the header", () => {
+    render(<Page />);
+    const link = screen.getByRole("link", {
+      name: /github repository/i,
+    });
+    expect(link).toHaveAttribute(
+      "href",
+      "https://github.com/sumbono/geo-rag-earth-dashboard",
+    );
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noopener");
+  });
+
+  it("renders the demo access card with the public sandbox credentials", () => {
+    render(<Page />);
+    const card = screen.getByTestId("demo-access-card");
+    expect(card).toHaveTextContent(/public sandbox with sample data/i);
+    expect(card).toHaveTextContent("demo");
+    expect(card).toHaveTextContent("demo-pass-123");
+  });
 });

@@ -77,6 +77,15 @@ describe("login page", () => {
   });
 });
 
+describe("login page demo hint", () => {
+  it("shows the muted demo hint line under the form", () => {
+    render(<LoginPage />);
+    expect(
+      screen.getByText("Demo: demo / demo-pass-123"),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("logout()", () => {
   it("POSTs /api/auth/logout then navigates to /login", async () => {
     stubFetch(200, { ok: true });

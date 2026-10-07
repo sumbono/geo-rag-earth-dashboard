@@ -67,6 +67,12 @@ body {
   text-decoration: underline;
 }
 
+.landing__nav-links {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+}
+
 /* --- hero --- */
 .hero {
   text-align: center;
@@ -107,6 +113,57 @@ body {
   gap: 0.75rem;
   justify-content: center;
   margin-top: 2rem;
+}
+
+/* --- demo access card (public sandbox credentials) --- */
+.demo-card {
+  display: inline-block;
+  margin-top: 1.75rem;
+  padding: 1rem 1.4rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  text-align: left;
+}
+
+.demo-card__tagline {
+  margin: 0 0 0.6rem;
+  color: var(--accent-strong);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.demo-card__creds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  margin: 0;
+}
+
+.demo-card__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.demo-card__label {
+  color: var(--ink-soft);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.demo-card__value {
+  padding: 0.2rem 0.55rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.95rem;
+  user-select: all;
 }
 
 .button {
@@ -279,4 +336,11 @@ body {
 .auth__submit:disabled {
   opacity: 0.65;
   cursor: default;
+}
+
+.auth__hint {
+  margin: 1rem 0 0;
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+  text-align: center;
 }

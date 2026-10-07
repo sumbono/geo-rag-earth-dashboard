@@ -87,6 +87,7 @@ export default function LoginPage() {
             {submitting ? "Logging in…" : "Log in"}
           </button>
         </form>
+        <p className="auth__hint">Demo: demo / demo-pass-123</p>
       </section>
     </main>
   );
