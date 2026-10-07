@@ -10,9 +10,13 @@ import path from "path";
  *   - docs/screenshots/landing.png            (landing page with filled slots)
  *   - docs/screenshots/dashboard-with-results.png
  *   - docs/screenshots/detail-panel.png
+ *   …each mirrored byte-identically into apps/web/public/screenshots/ (the
+ *   landing page's static source) by saveShot() below — regeneration writes
+ *   BOTH locations so README and landing can never diverge.
  *   - test-results/gif-frames/*.jpg — an ordered screenshot sequence of the
  *     e2e flow (login → search → detail → bbox → telemetry), assembled into
- *     docs/demo.gif by apps/web/scripts/make_gif.py.
+ *     docs/demo.gif (and mirrored to apps/web/public/demo.gif) by
+ *     apps/web/scripts/make_gif.py.
  *
  * Why a screenshot sequence and not Playwright's `video: "on"` → ffmpeg:
  * the videos could not be verified reliably here (frame-order probes of the
@@ -28,7 +32,22 @@ import path from "path";
  */
 
 const SHOTS_DIR = path.resolve(__dirname, "../../../docs/screenshots");
+// The landing page serves the same PNGs from apps/web/public/ — every save
+// below copies to both so regeneration can never desync the two mirrors.
+const PUBLIC_SHOTS_DIR = path.resolve(__dirname, "../public/screenshots");
 const FRAMES_DIR = path.resolve(__dirname, "../test-results/gif-frames");
+
+/** Screenshot to docs/screenshots/ and mirror into apps/web/public/screenshots/. */
+async function saveShot(
+  page: import("@playwright/test").Page,
+  name: string,
+  opts: { fullPage?: boolean } = {},
+) {
+  const dest = path.join(SHOTS_DIR, name);
+  await page.screenshot({ path: dest, ...opts });
+  fs.mkdirSync(PUBLIC_SHOTS_DIR, { recursive: true });
+  fs.copyFileSync(dest, path.join(PUBLIC_SHOTS_DIR, name));
+}
 
 test.skip(
   !!process.env.CI,
@@ -90,15 +109,13 @@ test("record: login → search → detail → bbox → telemetry (frames + scree
   await expect(results.getByRole("button").first()).toBeVisible();
   // Give the map a beat to fly to the markers before the screenshot.
   await page.waitForTimeout(2_000);
-  await page.screenshot({
-    path: path.join(SHOTS_DIR, "dashboard-with-results.png"),
-  });
+  await saveShot(page, "dashboard-with-results.png");
 
   await results.getByRole("button").first().click();
   const detail = page.getByRole("region", { name: "Tile details" });
   await expect(detail).toBeVisible();
   await page.waitForTimeout(1_000);
-  await page.screenshot({ path: path.join(SHOTS_DIR, "detail-panel.png") });
+  await saveShot(page, "detail-panel.png");
 
   // bbox draw (two map clicks) — same relative positions as dashboard.spec.ts
   const drawToggle = page.getByRole("button", { name: "Draw area" });
@@ -153,8 +170,5 @@ test("screenshot: landing page with filled preview slots", async ({ page }) => {
     .locator("img")
     .waitFor({ state: "visible" });
   await page.waitForTimeout(500);
-  await page.screenshot({
-    path: path.join(SHOTS_DIR, "landing.png"),
-    fullPage: true,
-  });
+  await saveShot(page, "landing.png", { fullPage: true });
 });

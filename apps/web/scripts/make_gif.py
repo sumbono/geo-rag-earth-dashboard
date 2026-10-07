@@ -9,7 +9,10 @@ Usage::
 Reads ``f000.jpg, f001.jpg, …`` (produced by ``e2e/recording.spec.ts``),
 resizes to 800 px wide, quantizes every frame to ONE shared adaptive
 palette (no per-frame palette flicker, Floyd–Steinberg dither), and writes
-an infinitely-looping GIF.
+an infinitely-looping GIF to the given output **and** byte-identically to
+``apps/web/public/demo.gif`` — the landing page's static source — so a
+regeneration can never leave the two mirrors out of sync (the README's
+regeneration flow depends on this).
 
 Why this exists instead of ``ffmpeg -i video.webm`` (the brief's first
 choice): Playwright's ``video: "on"`` output could not be verified
@@ -25,10 +28,14 @@ already present in this repo's .venv from the R13 thumbnail tooling).
 from __future__ import annotations
 
 import argparse
+import shutil
 import sys
 from pathlib import Path
 
 from PIL import Image
+
+# apps/web/scripts/ → apps/web/public/demo.gif (landing page's static source)
+PUBLIC_MIRROR = Path(__file__).resolve().parents[1] / "public" / "demo.gif"
 
 
 def build(
@@ -69,8 +76,13 @@ def build(
         loop=0,
         optimize=True,
     )
+    # Mirror byte-identically into apps/web/public/ — the landing page reads
+    # the GIF from there, the README from `out`; both must stay the same file.
+    PUBLIC_MIRROR.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(out, PUBLIC_MIRROR)
     size_kb = out.stat().st_size // 1024
     print(f"{out}: {len(quantized)} frames, {width}px, {size_kb} KiB")
+    print(f"mirrored → {PUBLIC_MIRROR}")
     if size_kb > 5 * 1024:
         print(
             "WARNING: over the ~5 MB plan budget — lower --colors or "

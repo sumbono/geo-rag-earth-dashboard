@@ -77,9 +77,12 @@ telemetry), recorded from the end-to-end flow:
 ![Demo walkthrough GIF](docs/demo.gif)
 
 The screenshots and GIF are regenerated from the live stack with
-`npx playwright test e2e/recording.spec.ts`, then assembled into a GIF by
-`apps/web/scripts/make_gif.py` (see either file's header for the how and
-why — the spec also documents why not Playwright video).
+`npx playwright test e2e/recording.spec.ts` (writes `docs/screenshots/`
+**and** mirrors into `apps/web/public/screenshots/`), then assembled into
+a GIF by `apps/web/scripts/make_gif.py` (writes `docs/demo.gif` **and**
+mirrors to `apps/web/public/demo.gif` — both locations on purpose, so the
+landing page can never drift from this README). See either file's header
+for the how and why; the spec also documents why not Playwright video.
 
 ## Optional: re-run the ETL (data enrichment)
 
