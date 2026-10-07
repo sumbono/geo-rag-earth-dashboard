@@ -40,6 +40,7 @@ vi.mock("maplibre-gl", () => ({
   default: { Map: hoisted.MockMap, Popup: hoisted.MockPopup },
   Map: hoisted.MockMap,
   Popup: hoisted.MockPopup,
+  setWorkerUrl: vi.fn(), // R13(b): Map.tsx pins the worker URL at import time
 }));
 
 const fetchMock = vi.fn<typeof fetch>();

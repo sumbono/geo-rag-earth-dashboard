@@ -11,10 +11,54 @@ import { expect, test } from "@playwright/test";
  * Selectors prefer roles/labels. The map exposes no test ids (app code stays
  * untouched by this task), so the canvas uses MapLibre's own stable
  * `.maplibregl-canvas` class and pixel positions derived from its box.
+ *
+ * R13(b) additions: the prod bundle must fetch maplibre's worker from the
+ * static asset (`/maplibre-gl-worker.mjs`, not the page URL) and actually
+ * render the worker-backed GeoJSON layers — result markers after search and
+ * the drawn rectangle after a bbox click. The Map component exposes an
+ * observational `container.__maplibreMap` handle for the layer queries.
  */
+
+/** Feature count of a GeoJSON circle/fill layer rendered on the real map. */
+function layerFeatureCount(page: import("@playwright/test").Page, layer: string) {
+  return page.evaluate((layerId) => {
+    const el = document.querySelector(".maplibregl-map") as
+      | (HTMLDivElement & {
+          __maplibreMap?: {
+            queryRenderedFeatures: (q: { layers: string[] }) => unknown[];
+          };
+        })
+      | null;
+    if (!el?.__maplibreMap) return -1;
+    try {
+      return el.__maplibreMap.queryRenderedFeatures({ layers: [layerId] }).length;
+    } catch {
+      // Style/layers not ready yet — keep polling.
+      return -1;
+    }
+  }, layer);
+}
+
 test("dashboard: login → search → detail → bbox draw → telemetry chart", async ({
   page,
 }) => {
+  // R13(b): collect worker-load failures; none may ever fire.
+  const workerErrors: string[] = [];
+  page.on("console", (msg) => {
+    if (msg.type() === "error" && msg.text().includes("Worker failed")) {
+      workerErrors.push(msg.text());
+    }
+  });
+  // R13(b): the worker must load from the static asset (200), proving the
+  // fix — the pre-fix build resolved `new Worker('')` to the page URL and
+  // failed with "Worker failed to load".
+  const workerLoaded = page.waitForResponse(
+    (response) =>
+      /\/maplibre-gl-worker\.mjs(\?.*)?$/.test(response.url()) &&
+      response.ok(),
+    { timeout: 60_000 },
+  );
+
   // ── 1. login (demo credentials) ─────────────────────────────────────────
   await page.goto("/login");
   await page.getByLabel("Username").fill("demo");
@@ -33,6 +77,15 @@ test("dashboard: login → search → detail → bbox draw → telemetry chart",
   // fetched inside the container).
   await expect(results).toBeVisible({ timeout: 60_000 });
   await expect(results.getByRole("button").first()).toBeVisible();
+
+  // ── R13(b): worker loaded + result markers actually rendered ────────────
+  await workerLoaded;
+  // The `results` GeoJSON source only paints through the worker, so a
+  // non-empty `result-markers` query after the fly-to is the end-to-end
+  // proof that markers/overlays render in the containerized prod build.
+  await expect
+    .poll(() => layerFeatureCount(page, "result-markers"), { timeout: 30_000 })
+    .toBeGreaterThan(0);
 
   // ── 3. click the first result chip → detail panel visible ───────────────
   await results.getByRole("button").first().click();
@@ -71,6 +124,11 @@ test("dashboard: login → search → detail → bbox draw → telemetry chart",
   // permanent visually-hidden role=alert outside the app's own error <p>s.
   await expect(drawToggle).toHaveAttribute("aria-pressed", "false");
   await expect(page.locator("main").getByRole("alert")).toHaveCount(0);
+  // R13(b): the drawn search rectangle is GeoJSON too — it must render
+  // (pre-fix it never did; both layers share the broken worker path).
+  await expect
+    .poll(() => layerFeatureCount(page, "draw-rectangle"), { timeout: 30_000 })
+    .toBeGreaterThan(0);
 
   // ── 5. telemetry tab shows the chart ────────────────────────────────────
   await page
@@ -84,4 +142,7 @@ test("dashboard: login → search → detail → bbox draw → telemetry chart",
     "d",
     /.{10,}/,
   );
+
+  // R13(b): no "Worker failed to load" may have been logged anywhere in the flow.
+  expect(workerErrors).toEqual([]);
 });

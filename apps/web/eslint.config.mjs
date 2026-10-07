@@ -21,6 +21,9 @@ const config = [
       "playwright-report/**",
       "coverage/**",
       "next-env.d.ts",
+      // R13(b): vendored maplibre worker bundle (synced by
+      // scripts/sync-maplibre-worker.mjs) — minified third-party code.
+      "public/**",
     ],
   },
   ...compat.extends("next/core-web-vitals", "next/typescript"),

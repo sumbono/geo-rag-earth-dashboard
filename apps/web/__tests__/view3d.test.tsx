@@ -175,6 +175,7 @@ vi.mock("maplibre-gl", () => ({
   default: { Map: hoisted.MockMap, Popup: hoisted.MockPopup },
   Map: hoisted.MockMap,
   Popup: hoisted.MockPopup,
+  setWorkerUrl: vi.fn(), // R13(b): Map.tsx pins the worker URL at import time
 }));
 
 /** Ring-0 centroids: tile-1 → (38.05, 21.05), tile-2 → (40.1, 23.1). */

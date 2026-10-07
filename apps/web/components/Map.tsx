@@ -5,11 +5,28 @@ import type { Feature, FeatureCollection } from "geojson";
 import {
   Map as MapLibreMap,
   Popup,
+  setWorkerUrl,
   type GeoJSONSource,
   type StyleSpecification,
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { Bbox, SearchResult } from "../lib/types";
+
+/**
+ * R13(b) — pin the worker to the copy in `public/`.
+ *
+ * maplibre-gl v6's default worker URL is `new URL('./maplibre-gl-worker.mjs',
+ * import.meta.url)`, guarded by `/^https?:/` on `import.meta.url`. Webpack
+ * statically rewrites `import.meta.url` to the build-time `file://` module
+ * path in the prod bundle, so that default resolves to `""` → `new Worker('')`
+ * → the page URL → "Worker failed to load" and no GeoJSON layer (result
+ * markers, draw rectangle) ever renders. The static asset is synced from
+ * node_modules by `scripts/sync-maplibre-worker.mjs` (predev/prebuild hooks).
+ */
+setWorkerUrl("/maplibre-gl-worker.mjs");
+
+/** Container element plus the R13(e2e) observational handle (see below). */
+type MapContainer = HTMLDivElement & { __maplibreMap?: MapLibreMap };
 
 const ESRI_TILES =
   "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
@@ -231,6 +248,10 @@ export default function Map({ results, onPick, onMapClick, ref }: MapProps) {
       style,
     });
     mapRef.current = map;
+    // E2E handle (R13): Playwright asserts the worker-backed GeoJSON layers
+    // actually render via `container.__maplibreMap.queryRenderedFeatures(...)`.
+    // Purely observational — no app code reads it.
+    (container as MapContainer).__maplibreMap = map;
 
     map.on("click", MARKERS_LAYER, (event) => {
       const feature = event.features?.[0];
@@ -252,6 +273,7 @@ export default function Map({ results, onPick, onMapClick, ref }: MapProps) {
     });
 
     return () => {
+      delete (container as MapContainer).__maplibreMap;
       map.remove();
       mapRef.current = null;
     };
