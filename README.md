@@ -18,10 +18,13 @@ git clone https://github.com/sumbono/geo-rag-earth-dashboard.git && cd geo-rag-e
 ```
 
 **Expected wait:** roughly 2–5 minutes on a first run — building the images
-dominates; the database seeds itself in seconds. The quickstart works
-offline after the images exist: there is **no manual seeding and no ETL to
-run** — the committed fixture dump (`fixtures/seed.sql.gz`) is restored
-automatically the first time Postgres starts.
+dominates; the database seeds itself in seconds (clean-clone measured:
+**2 min 16 s** from `git clone` to all three containers up, Docker layer
+cache warm; a machine pulling the base images for the first time sits at
+the upper end of the range). The quickstart works offline after the images
+exist: there is **no manual seeding and no ETL to run** — the committed
+fixture dump (`fixtures/seed.sql.gz`) is restored automatically the first
+time Postgres starts.
 
 Verify the stack is up:
 
