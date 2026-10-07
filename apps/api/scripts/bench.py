@@ -394,10 +394,12 @@ def main(argv: list[str] | None = None) -> int:
                 f"e2e leg: httpx POST `{args.base_url}/search/vector` with a cookie "
                 "session from `POST /auth/token` — the browser path (web `/api` proxy → "
                 "api → db). The stack ran with its compose settings (rate limit on); "
-                "n+warm-up stays under the 60/min search limit. Warm-up discards "
-                "absorb any first-request model load in the api process. Path "
-                "caveats and code-state notes live in the author-maintained "
-                "methodology section below, preserved verbatim across runs."
+                "n+warm-up stays under the 60/min search limit. Warm-up discards run "
+                "before sampling; the api's one-time model load happens at most once "
+                "per process (R15: encoder memoized) and never inside a measured "
+                "sample. Path caveats and code-state notes live in the "
+                "author-maintained methodology section below, preserved verbatim "
+                "across runs."
             )
     except Exception as exc:  # noqa: BLE001
         stats["e2e"] = _error_leg(BUDGETS_MS["e2e"], exc)
