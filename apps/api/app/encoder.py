@@ -10,6 +10,7 @@ inside `RemoteCLIPEncoder.__init__` — never at module top level — so importi
 this module (and the whole default test suite) works without ML deps installed.
 """
 import hashlib
+import threading
 from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
     from app.config import Settings
 
 _EMBED_DIM = 512  # RemoteCLIP ViT-B/32 output dim; pgvector rows assume this
+_DEFAULT_DEVICE = "cpu"  # RemoteCLIPEncoder's default; get_encoder never overrides it
 
 
 class Encoder(Protocol):
@@ -124,12 +126,43 @@ class RemoteCLIPEncoder:
         return _unit(feats[0].detach().float().cpu().numpy())
 
 
-def get_encoder(settings: "Settings") -> Encoder:
-    """Factory over `Settings.encoder` / env ENCODER — "fake" | "remoteclip"."""
-    if settings.encoder == "fake":
+# R15: process-level singleton cache. Construction of RemoteCLIPEncoder costs
+# ~2 s (model load) — building one per search request made e2e p95 miss the
+# 800 ms budget (docs/benchmarks.md, initial run). Keyed by the two plain
+# strings (encoder, device): Settings is a pydantic BaseSettings and
+# unhashable. Invalidation: NEVER within a process — env/config are fixed at
+# startup (uvicorn/compose), so a different key can only appear in a new
+# process, which starts with an empty cache.
+_ENCODER_CACHE: dict[tuple[str, str], Encoder] = {}
+_ENCODER_LOCK = threading.Lock()
+
+
+def _construct(encoder_name: str) -> Encoder:
+    if encoder_name == "fake":
         return FakeEncoder()
-    if settings.encoder == "remoteclip":
+    if encoder_name == "remoteclip":
         return RemoteCLIPEncoder()
     raise ValueError(
-        f"unknown encoder {settings.encoder!r}; expected 'fake' or 'remoteclip'"
+        f"unknown encoder {encoder_name!r}; expected 'fake' or 'remoteclip'"
     )
+
+
+def get_encoder(settings: "Settings") -> Encoder:
+    """Factory over `Settings.encoder` / env ENCODER — "fake" | "remoteclip".
+
+    Returns the process-level singleton for `(settings.encoder, device)`
+    (R15): the first call pays construction/model load, every later call —
+    e.g. every search request — reuses the same instance. Thread-safe
+    (double-checked lock); unknown encoder names still raise before caching.
+    """
+    key = (settings.encoder, _DEFAULT_DEVICE)
+    cached = _ENCODER_CACHE.get(key)
+    if cached is not None:
+        return cached
+    with _ENCODER_LOCK:
+        cached = _ENCODER_CACHE.get(key)
+        if cached is not None:
+            return cached
+        encoder = _construct(settings.encoder)
+        _ENCODER_CACHE[key] = encoder
+        return encoder

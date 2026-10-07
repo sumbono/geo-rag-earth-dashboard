@@ -26,6 +26,7 @@ import os
 import statistics
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]          # monorepo root
@@ -33,7 +34,11 @@ API_ROOT = Path(__file__).resolve().parents[1]            # apps/api → `import
 if str(API_ROOT) not in sys.path:
     sys.path.insert(0, str(API_ROOT))
 
-MACHINE_LINE = "8 vCPU, 15 GB RAM, CPU-only (this Coolify host), 2026-10-07"
+# Everything from this marker to EOF in the output file is author-editable
+# prose (static methodology notes, History) that the generator preserves
+# verbatim across runs — never re-derived, so its claims can't go stale.
+AUTHOR_MARK = "<!-- author-section -->"
+DEFAULT_OUT = REPO_ROOT / "docs" / "benchmarks.md"
 WARMUP = 3                       # discarded iterations per leg
 DEFAULT_DB_URL = "postgresql+psycopg://postgres:postgres@localhost:5432/geo"
 DEFAULT_BASE_URL = "http://localhost:3000/api"   # web /api proxy = browser path
@@ -48,6 +53,15 @@ QUERIES = (
     "seagrass bed submerged vegetation",
     "sand dune arid terrain",
 )
+
+
+# ── run metadata ──────────────────────────────────────────────────────────
+
+def machine_line(now: datetime | None = None) -> str:
+    """Run-date machine line — same shape every run, date = run day
+    (not frozen at authoring time; test_bench checks the pattern, not a date)."""
+    day = (now or datetime.now(timezone.utc)).strftime("%Y-%m-%d")
+    return f"8 vCPU, 15 GB RAM, CPU-only (this Coolify host), {day}"
 
 
 # ── statistics ────────────────────────────────────────────────────────────
@@ -95,11 +109,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--database-url",
                    default=os.environ.get("DATABASE_URL", DEFAULT_DB_URL),
                    help="Postgres DSN for the SQL leg (default: %(default)s)")
-    p.add_argument("--out", type=Path, default=REPO_ROOT / "docs" / "benchmarks.md",
+    p.add_argument("--out", type=Path, default=DEFAULT_OUT,
                    help="markdown output path (default: %(default)s)")
+    p.add_argument("--force", action="store_true",
+                   help="allow --encoder fake to overwrite the default out path "
+                        "(the committed real-run numbers)")
     args = p.parse_args(argv)
     if args.n < 1:
         p.error("--n must be >= 1")
+    if (args.encoder == "fake" and not args.force
+            and args.out.resolve() == DEFAULT_OUT.resolve()):
+        # Clobber guard: a fake-mode run must never silently overwrite the
+        # committed real-run benchmarks with CI-ish numbers.
+        p.error("--encoder fake would overwrite the committed real-run "
+                "benchmarks (docs/benchmarks.md) — pass --force or a "
+                "different --out")
     return args
 
 
@@ -134,7 +158,7 @@ def render_markdown(stats: dict, disclosures: list[str],
     lines = [
         "# Benchmarks — Geo-RAG Earth Dashboard",
         "",
-        f"**Machine:** {MACHINE_LINE}",
+        f"**Machine:** {machine_line()}",
         (
             f"**Run:** `python apps/api/scripts/bench.py --n {n}` — report-only: "
             "the script exits 0 regardless of verdicts (honest numbers, not a gate)."
@@ -163,6 +187,21 @@ def render_markdown(stats: dict, disclosures: list[str],
     lines += [f"- {d}" for d in disclosures]
     lines += ["", "---", ""]
     return "\n".join(lines)
+
+
+def preserved_author_section(path: Path) -> str:
+    """Everything from AUTHOR_MARK to EOF in the existing output file —
+    static methodology notes and History the generator carries forward
+    verbatim (author prose; may claim what is true about *code*, which the
+    run-derived disclosures above must not). Missing file/markup → ''."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    idx = text.find(AUTHOR_MARK)
+    if idx == -1:
+        return ""
+    return text[idx:].rstrip() + "\n"
 
 
 # ── measurement legs ──────────────────────────────────────────────────────
@@ -354,16 +393,17 @@ def main(argv: list[str] | None = None) -> int:
             disclosures.append(
                 f"e2e leg: httpx POST `{args.base_url}/search/vector` with a cookie "
                 "session from `POST /auth/token` — the browser path (web `/api` proxy → "
-                "api → db) minus Traefik/TLS, which local compose does not run. The "
-                "stack ran with its compose settings (rate limit on); n+warm-up stays "
-                "under the 60/min search limit. As shipped, `search_vector` constructs "
-                "the encoder per request, so (c) includes model load each call — that "
-                "is the (a)-vs-(c) gap, measured, not adjusted."
+                "api → db). The stack ran with its compose settings (rate limit on); "
+                "n+warm-up stays under the 60/min search limit. Warm-up discards "
+                "absorb any first-request model load in the api process. Path "
+                "caveats and code-state notes live in the author-maintained "
+                "methodology section below, preserved verbatim across runs."
             )
     except Exception as exc:  # noqa: BLE001
         stats["e2e"] = _error_leg(BUDGETS_MS["e2e"], exc)
 
     md = render_markdown(stats, disclosures, encoder_label=encoder_label)
+    md = md + preserved_author_section(args.out)
     print(md)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(md, encoding="utf-8")

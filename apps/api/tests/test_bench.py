@@ -6,6 +6,7 @@ evidence (docs/benchmarks.md), while these tests must pass with no stack,
 no DB and no ML deps installed.
 """
 import importlib.util
+import re
 from pathlib import Path
 
 import pytest
@@ -38,14 +39,41 @@ def test_parse_args_defaults(bench):
 
 
 def test_parse_args_flags(bench):
-    args = bench.parse_args(["--n", "10", "--encoder", "fake"])
+    args = bench.parse_args(["--n", "10", "--encoder", "fake", "--force"])
     assert args.n == 10
     assert args.encoder == "fake"
+    assert args.force is True
 
 
 def test_parse_args_rejects_bad_encoder(bench):
     with pytest.raises(SystemExit):
         bench.parse_args(["--encoder", "clip"])
+
+
+# ── fake-mode clobber guard ───────────────────────────────────────────────
+
+def test_fake_mode_refuses_default_out(bench, capsys):
+    """`--encoder fake` with the default out must REFUSE: CI-ish numbers
+    must never silently overwrite the committed real-run benchmarks."""
+    with pytest.raises(SystemExit):
+        bench.parse_args(["--encoder", "fake"])
+    assert "--force" in capsys.readouterr().err
+
+
+def test_fake_mode_allowed_with_force(bench):
+    args = bench.parse_args(["--encoder", "fake", "--force"])
+    assert args.encoder == "fake" and args.force is True
+
+
+def test_fake_mode_allowed_with_explicit_out(bench, tmp_path):
+    out = tmp_path / "bench.md"
+    args = bench.parse_args(["--encoder", "fake", "--out", str(out)])
+    assert args.out == out
+
+
+def test_real_mode_allowed_at_default_out(bench):
+    args = bench.parse_args([])   # real run is the committed default
+    assert args.out == bench.DEFAULT_OUT
 
 
 # ── p95 math (nearest-rank: sorted[ceil(0.95*n) - 1]) ─────────────────────
@@ -97,9 +125,22 @@ def _stats():
 
 
 def test_render_contains_machine_line(bench):
+    """Machine line derives its date from run time — assert the PATTERN,
+    not a frozen date (the date must change with each run)."""
     md = bench.render_markdown(_stats(), disclosures=["dummy note"])
-    assert bench.MACHINE_LINE in md
-    assert bench.MACHINE_LINE == "8 vCPU, 15 GB RAM, CPU-only (this Coolify host), 2026-10-07"
+    match = re.search(r"\*\*Machine:\*\* (.+)", md)
+    assert match, "machine line missing from rendered markdown"
+    assert re.fullmatch(
+        r"8 vCPU, 15 GB RAM, CPU-only \(this Coolify host\), \d{4}-\d{2}-\d{2}",
+        match.group(1),
+    )
+
+
+def test_machine_line_pattern_and_run_date(bench):
+    from datetime import datetime, timezone
+    line = bench.machine_line(datetime(2026, 10, 7, tzinfo=timezone.utc))
+    assert line == "8 vCPU, 15 GB RAM, CPU-only (this Coolify host), 2026-10-07"
+    assert bench.machine_line().split(", ")[-1].count("-") == 2  # derived, not frozen
 
 
 def test_render_contains_all_rows_and_verdicts(bench):
@@ -115,3 +156,24 @@ def test_render_error_leg_does_not_crash(bench):
     stats["sql"] = {"n": 0, "mean": None, "p95": None, "budget": 50.0, "error": "db unreachable"}
     md = bench.render_markdown(stats, disclosures=[])
     assert "ERROR" in md and "db unreachable" in md
+
+
+# ── author-section preservation (static prose survives regeneration) ──────
+
+def test_preserved_author_section_roundtrip(bench, tmp_path):
+    out = tmp_path / "benchmarks.md"
+    out.write_text(
+        f"generated head\n\n---\n\n{bench.AUTHOR_MARK}\n## History\nauthor prose\n",
+        encoding="utf-8",
+    )
+    section = bench.preserved_author_section(out)
+    assert section.startswith(bench.AUTHOR_MARK)
+    assert "## History" in section and "author prose" in section
+
+
+def test_preserved_author_section_absent_or_missing(bench, tmp_path):
+    missing = tmp_path / "nope.md"
+    assert bench.preserved_author_section(missing) == ""
+    stale = tmp_path / "stale.md"
+    stale.write_text("# no marker here\n", encoding="utf-8")
+    assert bench.preserved_author_section(stale) == ""

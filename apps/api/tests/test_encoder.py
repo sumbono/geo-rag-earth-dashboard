@@ -48,6 +48,78 @@ def test_get_encoder_rejects_unknown_encoder():
         get_encoder(Settings(encoder="dalle"))
 
 
+# ── R15: process-level singleton cache ─────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _clear_encoder_cache():
+    """The singleton cache must not leak across tests (nor into the ml tests)."""
+    from app import encoder as enc_mod
+    enc_mod._ENCODER_CACHE.clear()
+    yield
+    enc_mod._ENCODER_CACHE.clear()
+
+
+def test_get_encoder_returns_same_instance_for_fake():
+    """R15: get_encoder is a memoized factory — same settings → same object
+    (before the fix, every search request constructed a fresh encoder)."""
+    from app.config import Settings
+    from app.encoder import get_encoder
+    first = get_encoder(Settings(encoder="fake"))
+    second = get_encoder(Settings(encoder="fake"))  # a *different* Settings
+    assert first is second
+
+
+def test_get_encoder_cache_keyed_by_encoder_value(monkeypatch):
+    """Different `encoder` values must never share a cached instance —
+    key is (encoder, device) strings, not the (unhashable) Settings object.
+    RemoteCLIPEncoder is stubbed so this stays in the no-ML default suite."""
+    from app import encoder as enc_mod
+    from app.config import Settings
+
+    class StubRemoteCLIP:
+        def __init__(self, device: str = "cpu") -> None:
+            self.device = device
+
+    monkeypatch.setattr(enc_mod, "RemoteCLIPEncoder", StubRemoteCLIP)
+    fake = enc_mod.get_encoder(Settings(encoder="fake"))
+    remote_a = enc_mod.get_encoder(Settings(encoder="remoteclip"))
+    remote_b = enc_mod.get_encoder(Settings(encoder="remoteclip"))
+    assert fake is not remote_a
+    assert remote_a is remote_b
+    assert isinstance(remote_a, StubRemoteCLIP)
+
+
+def test_get_encoder_concurrent_calls_construct_once(monkeypatch):
+    """Thread-safe construction: concurrent first calls (cold cache) must
+    build exactly one encoder — every thread gets that same instance."""
+    import threading
+
+    from app import encoder as enc_mod
+    from app.config import Settings
+
+    built: list[int] = []
+
+    class CountingFake(enc_mod.FakeEncoder):
+        def __init__(self) -> None:
+            built.append(1)
+
+    monkeypatch.setattr(enc_mod, "FakeEncoder", CountingFake)
+    results: list[object] = []
+    barrier = threading.Barrier(8)
+
+    def worker() -> None:
+        barrier.wait()
+        results.append(enc_mod.get_encoder(Settings(encoder="fake")))
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(built) == 1
+    assert len(results) == 8 and all(r is results[0] for r in results)
+
+
 def _ml_ready() -> bool:
     """ML tests need the explicit opt-in AND the ML deps installed — either
     alone is not enough (default suite must run torch-free even when the ML
