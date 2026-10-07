@@ -182,7 +182,10 @@ describe("dashboard search UI", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Could not validate credentials",
     );
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // Spec §7: the 401 first costs one silent-refresh attempt (which the
+    // 401 stub also answers, i.e. fails) before the error surfaces —
+    // search + refresh, never a retry loop.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("replaces the plain placeholder with the designed empty state after a search", async () => {

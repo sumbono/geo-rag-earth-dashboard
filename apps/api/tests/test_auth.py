@@ -29,6 +29,24 @@ def test_login_unknown_user_401(create_client):
 
 
 @pytest.mark.db
+def test_login_over_72_byte_password_401_known_user(create_client):
+    """bcrypt raises ValueError past 72 bytes; the route must answer 401
+    (bad credentials), never 500 — spec §6/§7."""
+    r = create_client.post("/auth/token", data={"username": "demo", "password": "x" * 100})
+    assert r.status_code == 401
+    assert r.json() == {"detail": "Incorrect username or password"}
+
+
+@pytest.mark.db
+def test_login_over_72_byte_password_401_unknown_user(create_client):
+    # Unknown user → dummy-hash verify path; the ValueError must be caught
+    # there too (same 401 shape, no 500).
+    r = create_client.post("/auth/token", data={"username": "ghost", "password": "x" * 100})
+    assert r.status_code == 401
+    assert r.json() == {"detail": "Incorrect username or password"}
+
+
+@pytest.mark.db
 def test_login_rate_limited(limited_client):
     for _ in range(5):
         assert limited_client.post("/auth/token", data={"username":"demo","password":"wrong"}).status_code == 401

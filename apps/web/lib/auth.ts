@@ -7,6 +7,11 @@
  * token, API down) must never trap the user on an authenticated view; the
  * cookies are httpOnly and die server-side on their own schedule.
  *
+ * Spec §7 interplay: `apiFetch` silently refreshes a 401 first, so logging
+ * out with an expired access token but valid refresh cookie still succeeds
+ * (refresh → retry). The catch below is reached only when that refresh
+ * failed too (`ApiError.needsLogin`) or the API is down — navigate either way.
+ *
  * `navigate` defaults to a full-page location change (logout should reset
  * every bit of client state) and exists as a seam because jsdom cannot
  * navigate — production callers just use `logout()`.

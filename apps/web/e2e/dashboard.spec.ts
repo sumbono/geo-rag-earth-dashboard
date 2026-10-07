@@ -42,11 +42,29 @@ function layerFeatureCount(page: import("@playwright/test").Page, layer: string)
 test("dashboard: login → search → detail → bbox draw → telemetry chart", async ({
   page,
 }) => {
+  // ── 0. spec §6 security headers as actually delivered on `/` ────────────
+  // (web vitest can only see next.config's export; this is the live proof.)
+  const home = await page.request.get("/");
+  expect(home.ok()).toBe(true);
+  const homeHeaders = home.headers();
+  expect(homeHeaders["x-frame-options"]).toBe("SAMEORIGIN");
+  expect(homeHeaders["x-content-type-options"]).toBe("nosniff");
+  expect(homeHeaders["referrer-policy"]).toBe("strict-origin-when-cross-origin");
+  expect(homeHeaders["content-security-policy"]).toContain("frame-ancestors 'self'");
+  expect(homeHeaders["content-security-policy"]).toContain("default-src 'self'");
+  expect(homeHeaders["x-powered-by"]).toBeUndefined();
+
   // R13(b): collect worker-load failures; none may ever fire.
   const workerErrors: string[] = [];
+  // Spec §6: a CSP that actually works — no `Refused to …` violations may
+  // appear anywhere in the flow (tiles, worker, hydration, charts).
+  const cspViolations: string[] = [];
   page.on("console", (msg) => {
     if (msg.type() === "error" && msg.text().includes("Worker failed")) {
       workerErrors.push(msg.text());
+    }
+    if (msg.type() === "error" && msg.text().includes("Refused to")) {
+      cspViolations.push(msg.text());
     }
   });
   // R13(b): the worker must load from the static asset (200), proving the
@@ -145,4 +163,7 @@ test("dashboard: login → search → detail → bbox draw → telemetry chart",
 
   // R13(b): no "Worker failed to load" may have been logged anywhere in the flow.
   expect(workerErrors).toEqual([]);
+  // Spec §6: the security headers never broke the app — no CSP refusal
+  // (script/style/img/connect/worker) was logged across the whole flow.
+  expect(cspViolations).toEqual([]);
 });

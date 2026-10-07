@@ -247,7 +247,7 @@ clock is the source scene metadata / ingest time, not the browser):**
 
 ## 8. Testing Strategy
 
-- **api (pytest + httpx):** JWT issue/verify/expiry units; **refresh-token
+- **api (pytest + httpx2):** JWT issue/verify/expiry units; **refresh-token
   rotation + revocation test** (reuse of a consumed token → 401); **rate-limit
   test** (6th login attempt in a minute → 429); vector ranking against a
   50-row fixture DB with known embeddings (assert nearest-neighbor order);

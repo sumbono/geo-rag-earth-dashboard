@@ -16,6 +16,13 @@ import { apiFetch } from "../lib/api";
  * the supported client equivalent, and `replace` keeps Back from bouncing
  * straight back into a dead guard. Nothing renders while the probe is in
  * flight, so unauthenticated visitors never see the wrapped content.
+ *
+ * Spec §7: `apiFetch` already attempts ONE silent refresh when the probe
+ * 401s (expired access + valid refresh cookie → the retried probe succeeds
+ * and the guard never fires). Reaching the catch therefore means the
+ * refresh failed too — the distinguishable `ApiError(401, {needsLogin:
+ * true})` — or the API is unreachable; either way the existing pattern
+ * applies: hard-route to `/login`, never render authenticated content.
  */
 export default function AuthGuard({ children }: { children: ReactNode }) {
   const router = useRouter();
@@ -29,6 +36,9 @@ export default function AuthGuard({ children }: { children: ReactNode }) {
       })
       .catch(() => {
         if (cancelled) return;
+        // The auth-expired signal (`ApiError` with `needsLogin: true` after
+        // a failed silent refresh) and network errors both land here —
+        // route to /login either way (see docstring).
         setStatus("denied");
         router.replace("/login");
       });
