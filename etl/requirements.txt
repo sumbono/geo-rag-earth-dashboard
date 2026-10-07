@@ -1,0 +1,12 @@
+# ML stack for the RemoteCLIP embedding job (embed_remoteclip.py, Task 13) —
+# mirrors apps/api/requirements-ml.txt: CPU-only torch wheel index first.
+--index-url https://pypi.org/simple
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+open-clip-torch
+huggingface_hub
+pystac-client
+requests
+pytest
+rasterio
+numpy

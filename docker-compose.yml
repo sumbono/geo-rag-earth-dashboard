@@ -1,0 +1,34 @@
+services:
+  db:
+    build: { context: ./deploy, dockerfile: db.Dockerfile }
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: geo
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./deploy/initdb:/docker-entrypoint-initdb.d
+      - ./fixtures:/fixtures:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d geo"]
+      interval: 5s
+      retries: 10
+  api:
+    build: { context: ./apps/api }
+    environment: [DATABASE_URL=postgresql+psycopg://postgres:postgres@db:5432/geo,
+                  JWT_SECRET, REFRESH_SECRET, DEMO_USER, DEMO_PASSWORD, ENCODER, RATE_LIMIT_ENABLED,
+                  # R13(c): fixture thumbs ship with the repo (fixtures/thumbs),
+                  # so a fresh clone serves DetailPanel images without any host
+                  # ETL run. Unset outside compose → handler falls back to
+                  # Settings.thumbs_dir ("data/thumbs") for local dev.
+                  THUMBS_DIR=/fixtures/thumbs]
+    volumes:
+      - ./fixtures/thumbs:/fixtures/thumbs:ro
+    depends_on: { db: { condition: service_healthy } }
+  web:
+    build: ./apps/web
+    environment: [API_INTERNAL_URL=http://api:8000]
+    ports: ["3000:3000"]
+    depends_on: [api]
+volumes: { pgdata: {} }

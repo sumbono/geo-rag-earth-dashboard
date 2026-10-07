@@ -1,0 +1,9 @@
+%% Geo-RAG Earth Dashboard — runtime topology (mirrors PLAN.md §4 exactly)
+flowchart LR
+    Browser["Browser<br/>HTTPS"] -->|"Host geo.sumbono.dev"| Traefik["Traefik :80/:443<br/>existing proxy, Let's Encrypt"]
+    Traefik -->|"Host geo.sumbono.dev"| Web["web — Next.js :3000<br/>public routes + /api proxy"]
+    Traefik --> Api["api — FastAPI :8000<br/>internal compose network<br/>JWT validation, vector/bbox/telemetry"]
+    Web -->|"/api/* proxy"| Api
+    Api --> Db[("postgres:16<br/>+ PostGIS + pgvector<br/>+ timeseries")]
+    Etl["etl/ — runs once on the host<br/>manual, CPU-only, offline"] --> Db
+    Seed["fixtures/seed.sql.gz<br/>restored at db init"] --> Db

@@ -1,0 +1,71 @@
+"use client";
+
+import type { SearchResult } from "../lib/types";
+
+export interface ResultsPanelProps {
+  results: SearchResult[];
+  /** Currently picked hit — highlighted row; owned by the page. */
+  selectedId?: string | null;
+  onPick: (id: string) => void;
+}
+
+/**
+ * Ranked search hits (Task 17): one row per result showing `score` at 2
+ * decimal places and `captured_at`'s UTC date (ISO slice 0..10). Clicking a
+ * row calls `onPick(id)`; the page mirrors that onto the map selection.
+ * Empty state is a placeholder — Task 18 owns the designed version.
+ */
+export default function ResultsPanel({
+  results,
+  selectedId,
+  onPick,
+}: ResultsPanelProps) {
+  if (results.length === 0) {
+    return <p style={{ margin: 0 }}>No results</p>;
+  }
+
+  return (
+    <ul
+      aria-label="Search results"
+      style={{
+        listStyle: "none",
+        margin: 0,
+        padding: 0,
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        maxHeight: "min(60vh, 560px)",
+        overflowY: "auto",
+      }}
+    >
+      {results.map((result) => {
+        const selected = result.id === selectedId;
+        return (
+          <li key={result.id}>
+            <button
+              type="button"
+              aria-pressed={selected}
+              onClick={() => onPick(result.id)}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 8,
+                width: "100%",
+                padding: "8px 10px",
+                cursor: "pointer",
+                textAlign: "left",
+                borderRadius: 6,
+                border: "1px solid rgba(148, 163, 184, 0.45)",
+                background: selected ? "#1d4ed8" : "transparent",
+                color: selected ? "#ffffff" : "inherit",
+              }}
+            >
+              <span>{result.score.toFixed(2)}</span>
+              <span>{result.captured_at.slice(0, 10)}</span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
