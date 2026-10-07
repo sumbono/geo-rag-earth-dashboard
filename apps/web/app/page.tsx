@@ -10,9 +10,20 @@ export default function Home() {
     <main className="landing">
       <header className="landing__nav">
         <span className="landing__brand">Geo-RAG Earth Dashboard</span>
-        <Link className="landing__nav-link" href="/login">
-          Log in
-        </Link>
+        <nav className="landing__nav-links" aria-label="Header">
+          <a
+            className="landing__nav-link"
+            href="https://github.com/sumbono/geo-rag-earth-dashboard"
+            target="_blank"
+            rel="noopener"
+            aria-label="GitHub repository"
+          >
+            GitHub
+          </a>
+          <Link className="landing__nav-link" href="/login">
+            Log in
+          </Link>
+        </nav>
       </header>
 
       <section className="hero">
@@ -34,6 +45,22 @@ export default function Home() {
             Log in
           </Link>
         </div>
+
+        <aside className="demo-card" data-testid="demo-access-card">
+          <p className="demo-card__tagline">
+            Public sandbox with sample data
+          </p>
+          <p className="demo-card__creds">
+            <span className="demo-card__field">
+              <span className="demo-card__label">Username</span>
+              <code className="demo-card__value">demo</code>
+            </span>
+            <span className="demo-card__field">
+              <span className="demo-card__label">Password</span>
+              <code className="demo-card__value">demo-pass-123</code>
+            </span>
+          </p>
+        </aside>
       </section>
 
       <section className="preview" aria-label="Product preview">
