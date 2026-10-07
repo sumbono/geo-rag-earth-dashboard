@@ -71,8 +71,8 @@ beforeEach(() => {
 
 afterEach(() => {
   // Collect before restoring so a failure still cleans up the spies.
-  const errors = consoleError.mock.calls.map((args) => String(args[0]));
-  const warns = consoleWarn.mock.calls.map((args) => String(args[0]));
+  const errors = consoleError.mock.calls.map((args: unknown[]) => String(args[0]));
+  const warns = consoleWarn.mock.calls.map((args: unknown[]) => String(args[0]));
   consoleError.mockRestore();
   consoleWarn.mockRestore();
   expect(errors).toEqual([]);

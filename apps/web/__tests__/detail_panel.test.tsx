@@ -120,8 +120,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  const errors = consoleError.mock.calls.map((args) => String(args[0]));
-  const warns = consoleWarn.mock.calls.map((args) => String(args[0]));
+  const errors = consoleError.mock.calls.map((args: unknown[]) => String(args[0]));
+  const warns = consoleWarn.mock.calls.map((args: unknown[]) => String(args[0]));
   consoleError.mockRestore();
   consoleWarn.mockRestore();
   expect(errors).toEqual([]);

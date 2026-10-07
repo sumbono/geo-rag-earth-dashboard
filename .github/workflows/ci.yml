@@ -1,0 +1,189 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── api: Python 3.12, pytest core only (NO ML) ───────────────────────────
+  api:
+    name: api — pytest core (no ML)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            apps/api/requirements.txt
+            apps/api/requirements-dev.txt
+
+      # Config-gated on purpose: this repo has NO ruff config yet, and an
+      # unconfigured `ruff check` would either be noise or a fake green
+      # check. The step starts running ruff for real the moment a config
+      # file exists (pyproject.toml / ruff.toml / .ruff.toml).
+      - name: ruff (config-gated)
+        run: |
+          if ls pyproject.toml ruff.toml .ruff.toml 2>/dev/null | grep -q .; then
+            python -m pip install --quiet ruff
+            ruff check .
+          else
+            echo "::notice title=ruff skipped::No ruff config in the repo yet (add pyproject.toml [tool.ruff] or ruff.toml) — this step then runs ruff for real. Deliberately NOT a vacuous green check."
+          fi
+
+      - name: Install deps (apps + etl core-only, no ML)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r apps/api/requirements.txt -r apps/api/requirements-dev.txt
+          # etl's core tests import rasterio/pystac-client/requests, but
+          # etl/requirements.txt also bundles the torch/open-clip ML stack —
+          # this job is "no ML", so only the non-ML imports are installed.
+          # (ML laziness is a repo invariant: apps/api/app/encoder.py imports
+          # torch/open_clip only inside RemoteCLIPEncoder.__init__.)
+          pip install rasterio pystac-client requests
+
+      # Compose db is the fixture-seeded Postgres (postgis + pgvector,
+      # 02-seed.sh restores fixtures/seed.sql.gz into `geo` on first boot).
+      # Tests never touch `geo`: they run against the dedicated geo_test db.
+      - name: Start Postgres (compose db)
+        run: docker compose up -d --build --wait db
+
+      # ORDERING (Task 14 pointer, chosen solution): the apps conftest
+      # bootstraps the geo_test database (CREATE DATABASE + extensions);
+      # the etl suite connects to geo_test directly and assumes it exists.
+      # Therefore apps pytest runs FIRST, and the etl suite reuses geo_test.
+      - name: pytest apps (core, -m "not ml")
+        working-directory: apps/api
+        run: pytest -q -m "not ml"
+
+      - name: pytest etl (core, -m "not smoke")
+        working-directory: etl
+        run: pytest -q -m "not smoke"
+
+  # ── web: Node 22, lint + typecheck + vitest + next build ─────────────────
+  web:
+    name: web — lint, typecheck, vitest, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: npm ci
+        run: npm ci
+
+      # Real config (apps/web/eslint.config.mjs, eslint 9 flat + eslint-config-next):
+      # fails the job on lint ERRORS. Warnings (28 today: no-img-element,
+      # exhaustive-deps, test-mock `any`s downgraded to warn in __tests__ only)
+      # are printed but non-failing — they pre-date this task.
+      - name: lint (eslint)
+        run: npm run lint
+
+      # tsc --noEmit over the whole tree, tests included: the 8 pre-existing
+      # TS7006 implicit-any errors in __tests__ were fixed in Task 22, so the
+      # gate is honest rather than scoped around the failures.
+      - name: typecheck (tsc --noEmit)
+        run: npm run typecheck
+
+      - name: unit tests (vitest)
+        run: npm run test
+
+      - name: build (next build)
+        run: npm run build
+
+  # ── e2e: compose stack (fixture self-seed) + Playwright ──────────────────
+  e2e:
+    name: e2e — compose + Playwright
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      # The repo commits no .env, so compose interpolation needs the stack's
+      # secrets explicitly. Demo creds are the documented defaults (docs +
+      # .env.example): demo / demo-pass-123.
+      JWT_SECRET: ci-jwt-secret-0123456789abcdef0123456789abcdef01
+      REFRESH_SECRET: ci-refresh-secret-0123456789abcdef0123456789abcdef
+      DEMO_USER: demo
+      DEMO_PASSWORD: demo-pass-123
+      # Fixture dump is embedded with the REAL RemoteCLIP encoder (578 MB of
+      # weights downloaded inside the api container on first search, never
+      # baked into the image). ENCODER=fake keeps this job offline and
+      # deterministic per the brief ("no network, no ETL, fast"); the e2e
+      # asserts the UI flow, and ranking correctness is covered by the api
+      # pytest suite. Local verification ran BOTH encoders — see the task
+      # report.
+      ENCODER: fake
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Build + start compose stack
+        run: docker compose up -d --build
+
+      # Task 14's 02-seed.sh restores fixtures/seed.sql.gz on first db boot —
+      # wait for its success line rather than assuming the volume is seeded.
+      - name: Wait for fixture seed (02-seed.sh)
+        run: |
+          for i in $(seq 1 60); do
+            if docker compose logs db 2>&1 | grep -q "02-seed: restored"; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::fixture seed log not seen within 120s"
+          docker compose logs db
+          exit 1
+
+      - name: Wait for web (:3000)
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:3000/ > /dev/null; then exit 0; fi
+            sleep 2
+          done
+          echo "::error::web never came up on :3000"
+          docker compose ps
+          docker compose logs web api
+          exit 1
+
+      - name: npm ci (apps/web)
+        working-directory: apps/web
+        run: npm ci
+
+      - name: Install Playwright chromium
+        working-directory: apps/web
+        run: npx playwright install --with-deps chromium
+
+      - name: Playwright e2e
+        working-directory: apps/web
+        run: npx playwright test
+
+      - name: Upload Playwright report/trace (failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results
+          retention-days: 7
