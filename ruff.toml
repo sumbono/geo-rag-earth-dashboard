@@ -1,0 +1,17 @@
+# Ruff config — created for ruling R14a (Task 22 fix round 2).
+#
+# B008 (function-call-in-default-argument) fires on FastAPI's classic
+# dependency-injection idiom, which is THE style every brief-written route
+# uses (`def route(dep: X = Depends(f))`). The controller ruled: keep the
+# idiom (an Annotated-style migration was considered and rejected as too
+# large for brief code), and teach B008 that these FastAPI markers are
+# immutable-by-convention instead. No `select` is set here, so ruff's default
+# rule set runs unchanged; only B008's false-positive domain shrinks.
+[lint.flake8-bugbear]
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Form",
+    "fastapi.Body",
+]

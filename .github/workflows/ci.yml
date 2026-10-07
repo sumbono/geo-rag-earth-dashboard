@@ -28,15 +28,11 @@ jobs:
             apps/api/requirements-dev.txt
 
       # Runs UNCONDITIONALLY, pinned (Task-22 review round 1 removed the old
-      # config gate — no ruff config exists repo-wide, so the gate's notice
-      # branch always fired and ruff never linted anything).
-      # Current honest state: `ruff check .` with ruff==0.16.10 defaults exits
-      # 1 with 25 findings this repo has NOT cleared yet — 23x B008 (FastAPI
-      # `Depends(...)` default-arg idiom: needs an Annotated-style migration or
-      # a ruled config), 1x BLE001 (deliberate broad catch, spec §7 "skip,
-      # never crash"), 1x TRY004 (switching ValueError→TypeError would escape
-      # the handler that keeps malformed manifest lines from crashing). Listed
-      # in task-22-report.md for a ruling rather than silenced, per review.
+      # config gate — no ruff config existed, so the gate never linted).
+      # Round 2 rulings R14a/b/c cleared the last findings: root ruff.toml
+      # teaches B008 the FastAPI Depends/Query/Path/Form/Body idiom (classic
+      # brief code, no churn), BLE001/TRY004 carry targeted documented noqas
+      # on the spec-§7 never-crash paths. `ruff check .` exits 0.
       - name: ruff
         run: |
           python -m pip install --quiet ruff==0.16.10

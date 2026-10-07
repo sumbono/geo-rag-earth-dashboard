@@ -128,7 +128,7 @@ def load_manifest(path: Path | str) -> list[dict]:
         try:
             rec = json.loads(line)
             if not isinstance(rec, dict):
-                raise ValueError("not a JSON object")
+                raise ValueError("not a JSON object")  # noqa: TRY004 — ValueError is the contract (callers catch it; TypeError would escape)
         except (json.JSONDecodeError, ValueError) as exc:
             logger.warning(
                 "ignoring malformed chips manifest line in %s (%s)", path, exc

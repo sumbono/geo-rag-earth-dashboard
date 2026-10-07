@@ -484,7 +484,7 @@ def download_scene(record: dict, scene_dir: Path, raw_assets: dict) -> dict:
         else:
             record["status"] = "downloaded"
             record["reason"] = None
-    except Exception as exc:  # non-access failure: logged + skipped (spec §7)
+    except Exception as exc:  # noqa: BLE001 — non-access failure: logged + skipped (spec §7)
         record["status"] = "failed"
         record["reason"] = f"{type(exc).__name__}: {exc}"
         logger.warning(
