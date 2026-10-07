@@ -17,7 +17,14 @@ services:
   api:
     build: { context: ./apps/api }
     environment: [DATABASE_URL=postgresql+psycopg://postgres:postgres@db:5432/geo,
-                  JWT_SECRET, REFRESH_SECRET, DEMO_USER, DEMO_PASSWORD, ENCODER, RATE_LIMIT_ENABLED]
+                  JWT_SECRET, REFRESH_SECRET, DEMO_USER, DEMO_PASSWORD, ENCODER, RATE_LIMIT_ENABLED,
+                  # R13(c): fixture thumbs ship with the repo (fixtures/thumbs),
+                  # so a fresh clone serves DetailPanel images without any host
+                  # ETL run. Unset outside compose → handler falls back to
+                  # Settings.thumbs_dir ("data/thumbs") for local dev.
+                  THUMBS_DIR=/fixtures/thumbs]
+    volumes:
+      - ./fixtures/thumbs:/fixtures/thumbs:ro
     depends_on: { db: { condition: service_healthy } }
   web:
     build: ./apps/web

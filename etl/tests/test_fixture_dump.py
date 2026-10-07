@@ -18,6 +18,11 @@ Contract under test:
     entrypoint runs it rather than sourcing it — a sourced ``exit`` would
     kill entrypoint) and refuses to run with the pipe in place (``set -e`` +
     ``ON_ERROR_STOP``).
+ 4. **Bundled thumbs (R13(c)):** every ``tiles.thumb_path`` recorded in the
+    dump has a committed JPEG (plus its ``_fc`` sibling) under
+    ``fixtures/thumbs`` and vice versa — the manifest/dump/disk cross-check
+    that keeps a fresh clone's DetailPanel images from 404ing, with a total
+    size budget so the repo stays sane.
 
 The restore test drives the script *inside the db container* (it calls
 ``psql``/``gunzip``; neither exists on the host here) with ``SEED_DB``
@@ -43,6 +48,7 @@ FIXTURES = REPO_ROOT / "fixtures"
 SEED_SQL = FIXTURES / "seed.sql.gz"
 SEED_MANIFEST = FIXTURES / "seed.manifest.json"
 INITDB_SCRIPT = REPO_ROOT / "deploy" / "initdb" / "02-seed.sh"
+THUMBS_DIR = FIXTURES / "thumbs"  # R13(c): bundled fixture thumbnails
 
 SCRATCH_DB = "geo_seed_restore_test"
 ADMIN_URL = (
@@ -51,6 +57,7 @@ ADMIN_URL = (
 
 R3_FLOOR = 40  # fixture-dump floor (Ruling R3: target 100, floor 40)
 MAX_DUMP_BYTES = 10 * 1024 * 1024  # commit gate: keep the dump small
+MAX_THUMB_BYTES = 8 * 1024 * 1024  # R13(c): fixture thumbs commit budget
 
 
 # --------------------------------------------------------------------------
@@ -107,6 +114,21 @@ def _dump_manifest() -> dict:
     return json.loads(SEED_MANIFEST.read_text(encoding="utf-8"))
 
 
+def _dump_thumb_paths() -> list[str]:
+    """The ``thumb_path`` column (4th field) of every row in the tiles COPY."""
+    text = gzip.decompress(SEED_SQL.read_bytes()).decode("utf-8")
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if line.startswith("COPY public.tiles "):
+            paths = []
+            for row in lines[i + 1:]:
+                if row == r"\.":
+                    break
+                paths.append(row.split("\t")[3])
+            return paths
+    raise AssertionError("COPY public.tiles section not found in dump")
+
+
 def _run_seed_script(env: dict, timeout: int = 120) -> subprocess.CompletedProcess:
     """Run the committed 02-seed.sh inside the db container with env overrides.
 
@@ -145,6 +167,44 @@ def test_seed_dump_gzip_and_manifest_sanity():
     assert manifest["tables"] == ["tiles", "telemetry"]
     assert manifest["gz_bytes"] == SEED_SQL.stat().st_size
     assert set(manifest["scenes"]), "dump manifest must name the scenes"
+
+
+def test_fixture_thumbs_manifest_cross_check():
+    """R13(c): dump thumb_paths ↔ fixtures/thumbs files ↔ manifest, under budget.
+
+    For every ``tiles.thumb_path`` row in the committed dump there must be a
+    committed JPEG ``fixtures/thumbs/{file}`` AND its ``{stem}_fc.jpg``
+    sibling (the DetailPanel false-color toggle), and disk must hold no
+    extras — so a fresh clone serves every thumbnail with zero network and
+    zero host ETL. The size budget keeps the bundle repo-sane (≤ 8 MB).
+    """
+    manifest = _dump_manifest()
+    thumb_paths = _dump_thumb_paths()
+    assert len(thumb_paths) == manifest["tiles_count"], (
+        "dump rows and manifest tiles_count disagree"
+    )
+    assert thumb_paths, "dump carries no thumb_path rows"
+
+    base = set(thumb_paths)
+    fc = {name.replace(".jpg", "_fc.jpg") for name in base}
+    expected = base | fc
+
+    assert THUMBS_DIR.is_dir(), (
+        "fixtures/thumbs missing — bundle the re-encoded fixture thumbnails "
+        "(256px JPEG q75) so fresh deploys serve DetailPanel images"
+    )
+    on_disk = {p.name for p in THUMBS_DIR.glob("*.jpg")}
+    assert on_disk == expected, (
+        f"missing={sorted(expected - on_disk)[:5]} "
+        f"extra={sorted(on_disk - expected)[:5]}"
+    )
+    empty = [name for name in expected if (THUMBS_DIR / name).stat().st_size == 0]
+    assert not empty, f"zero-byte thumbs: {empty[:5]}"
+
+    total = sum((THUMBS_DIR / name).stat().st_size for name in expected)
+    assert total <= MAX_THUMB_BYTES, (
+        f"fixture thumbs total {total} bytes exceeds {MAX_THUMB_BYTES} budget"
+    )
 
 
 @pytest.mark.db
