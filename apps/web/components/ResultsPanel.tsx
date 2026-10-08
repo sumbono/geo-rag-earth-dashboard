@@ -13,17 +13,17 @@ export interface ResultsPanelProps {
  * Ranked search hits (Task 17): one row per result showing `score` at 2
  * decimal places and `captured_at`'s UTC date (ISO slice 0..10). Clicking a
  * row calls `onPick(id)`; the page mirrors that onto the map selection.
- * Empty state is a placeholder — Task 18 owns the designed version.
+ * Selection is exposed as `aria-current` (a row marks position in a list —
+ * audit #13), not `aria-pressed`. Rows are styled by `.results-row` in
+ * globals.css (mono + tabular-nums data, accent-soft selected tint).
+ * The page only mounts this panel when `results.length > 0` — the empty
+ * case is the EmptyState's (Task 18).
  */
 export default function ResultsPanel({
   results,
   selectedId,
   onPick,
 }: ResultsPanelProps) {
-  if (results.length === 0) {
-    return <p style={{ margin: 0 }}>No results</p>;
-  }
-
   return (
     <ul
       aria-label="Search results"
@@ -33,7 +33,7 @@ export default function ResultsPanel({
         padding: 0,
         display: "flex",
         flexDirection: "column",
-        gap: 6,
+        gap: "var(--space-2xs)",
         maxHeight: "min(60vh, 560px)",
         overflowY: "auto",
       }}
@@ -44,21 +44,10 @@ export default function ResultsPanel({
           <li key={result.id}>
             <button
               type="button"
-              aria-pressed={selected}
+              className="results-row"
+              data-testid="result-row"
+              aria-current={selected ? "true" : undefined}
               onClick={() => onPick(result.id)}
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                gap: 8,
-                width: "100%",
-                padding: "8px 10px",
-                cursor: "pointer",
-                textAlign: "left",
-                borderRadius: 6,
-                border: "1px solid rgba(148, 163, 184, 0.45)",
-                background: selected ? "#1d4ed8" : "transparent",
-                color: selected ? "#ffffff" : "inherit",
-              }}
             >
               <span>{result.score.toFixed(2)}</span>
               <span>{result.captured_at.slice(0, 10)}</span>

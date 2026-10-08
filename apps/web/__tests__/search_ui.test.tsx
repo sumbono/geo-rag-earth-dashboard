@@ -324,8 +324,9 @@ describe("map", () => {
     expect(html).toContain("2024-05-01");
     expect(popup.addTo).toHaveBeenCalledWith(map);
 
+    // rows mark position in the list → aria-current, not aria-pressed (audit #13)
     expect(
       screen.getByRole("button", { name: /0\.88/ }),
-    ).toHaveAttribute("aria-pressed", "true");
+    ).toHaveAttribute("aria-current", "true");
   });
 });

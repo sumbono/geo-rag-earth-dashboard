@@ -134,10 +134,7 @@ export default function DashboardPage() {
       : (results.find((result) => result.id === selectedId) ?? null);
 
   return (
-    <main
-      className="dashboard"
-      style={{ display: "flex", flexDirection: "column", gap: 12, padding: 16 }}
-    >
+    <main className="dashboard">
       <SearchBar
         query={query}
         onQueryChange={setQuery}
@@ -155,7 +152,7 @@ export default function DashboardPage() {
         onRectangle={(bbox) => mapRef.current?.setRectangle(bbox)}
         onError={handleError}
       />
-      <div style={{ display: "flex", gap: 8 }} role="group" aria-label="View">
+      <div className="dash-row" role="group" aria-label="View">
         {TABS.map(({ id, label }) => (
           <button
             key={id}
@@ -171,24 +168,17 @@ export default function DashboardPage() {
         ))}
       </div>
       {error !== null && (
-        <p role="alert" style={{ margin: 0, color: "#b91c1c" }}>
+        <p role="alert" className="dash-alert">
           {error}
         </p>
       )}
       {loading && (
-        <p role="status" style={{ margin: 0 }}>
+        <p role="status" className="dash-status">
           Searching…
         </p>
       )}
       {tab === "map" && (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 1fr) 300px",
-            gap: 12,
-            alignItems: "start",
-          }}
-        >
+        <div className="dash-grid">
           <MapView
             ref={mapRef}
             results={results}

@@ -104,7 +104,7 @@ export default function BboxDraw({
   }
 
   return (
-    <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+    <div style={{ display: "flex", gap: "var(--space-2xs)", alignItems: "center", flexWrap: "wrap" }}>
       <button
         type="button"
         className="button button--ghost"
@@ -116,7 +116,7 @@ export default function BboxDraw({
       {active && (
         <p
           role="status"
-          style={{ margin: 0, fontSize: "0.9rem", color: "var(--ink-soft, #4a5b6a)" }}
+          style={{ margin: 0, fontSize: "var(--text-sm)", color: "var(--color-ink-soft)" }}
         >
           {corner === null ? (
             "Click the map to set corner A (Esc cancels)."

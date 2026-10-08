@@ -26,9 +26,9 @@ function formatBbox(bbox: number[][][]): string {
 }
 
 const chipStyle: CSSProperties = {
-  padding: "4px 10px",
-  borderRadius: 999,
-  border: "1px solid var(--border, #d7e0e8)",
+  padding: "var(--space-3xs) var(--space-xs)",
+  borderRadius: "var(--radius-control)",
+  border: "1px solid var(--color-rule-2)",
   background: "transparent",
   cursor: "pointer",
   font: "inherit",
@@ -56,13 +56,13 @@ export default function DetailPanel({
       aria-label="Tile details"
       className="detail-panel"
       style={{
-        background: "var(--surface, #ffffff)",
-        border: "1px solid var(--border, #d7e0e8)",
-        borderRadius: 14,
-        padding: 16,
+        background: "var(--color-paper-2)",
+        border: "var(--rule)",
+        borderRadius: "var(--radius-card)",
+        padding: "var(--space-sm)",
         display: "flex",
         flexDirection: "column",
-        gap: 12,
+        gap: "var(--space-xs)",
       }}
     >
       <header
@@ -79,13 +79,13 @@ export default function DetailPanel({
           aria-label="Close"
           onClick={onClose}
           style={{
-            border: "1px solid var(--border, #d7e0e8)",
-            borderRadius: 8,
+            border: "1px solid var(--color-rule-2)",
+            borderRadius: "var(--radius-control)",
             background: "transparent",
             cursor: "pointer",
             font: "inherit",
             lineHeight: 1,
-            padding: "4px 10px",
+            padding: "var(--space-3xs) var(--space-xs)",
           }}
         >
           ×
@@ -107,9 +107,9 @@ export default function DetailPanel({
             style={{
               width: "100%",
               maxWidth: 360,
-              borderRadius: 8,
+              borderRadius: "var(--radius-card)",
               display: "block",
-              background: "#e1e8ee",
+              background: "var(--color-rule)",
             }}
           />
           <div
@@ -123,11 +123,11 @@ export default function DetailPanel({
               onClick={() => setFalseColor(false)}
               style={{
                 ...chipStyle,
-                background: falseColor ? "transparent" : "var(--accent, #0b6f8f)",
-                color: falseColor ? "inherit" : "#ffffff",
+                background: falseColor ? "transparent" : "var(--color-accent)",
+                color: falseColor ? "inherit" : "var(--color-accent-ink)",
                 borderColor: falseColor
-                  ? "var(--border, #d7e0e8)"
-                  : "var(--accent, #0b6f8f)",
+                  ? "var(--color-rule-2)"
+                  : "var(--color-accent)",
               }}
             >
               True color
@@ -138,11 +138,11 @@ export default function DetailPanel({
               onClick={() => setFalseColor(true)}
               style={{
                 ...chipStyle,
-                background: falseColor ? "var(--accent, #0b6f8f)" : "transparent",
-                color: falseColor ? "#ffffff" : "inherit",
+                background: falseColor ? "var(--color-accent)" : "transparent",
+                color: falseColor ? "var(--color-accent-ink)" : "inherit",
                 borderColor: falseColor
-                  ? "var(--accent, #0b6f8f)"
-                  : "var(--border, #d7e0e8)",
+                  ? "var(--color-accent)"
+                  : "var(--color-rule-2)",
               }}
             >
               False color
@@ -160,15 +160,15 @@ export default function DetailPanel({
             fontSize: "0.92rem",
           }}
         >
-          <dt style={{ color: "var(--ink-soft, #4a5b6a)", fontWeight: 600 }}>
+          <dt style={{ color: "var(--color-ink-soft)", fontWeight: 600 }}>
             Captured
           </dt>
           <dd style={{ margin: 0 }}>{tile.captured_at}</dd>
-          <dt style={{ color: "var(--ink-soft, #4a5b6a)", fontWeight: 600 }}>
+          <dt style={{ color: "var(--color-ink-soft)", fontWeight: 600 }}>
             Bounding box
           </dt>
           <dd style={{ margin: 0 }}>{formatBbox(tile.bbox)}</dd>
-          <dt style={{ color: "var(--ink-soft, #4a5b6a)", fontWeight: 600 }}>
+          <dt style={{ color: "var(--color-ink-soft)", fontWeight: 600 }}>
             Score
           </dt>
           <dd style={{ margin: 0 }}>{tile.score.toFixed(2)}</dd>

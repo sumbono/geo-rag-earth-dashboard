@@ -80,7 +80,8 @@ export default function SearchBar({
           {submitting ? "Searching…" : "Search"}
         </button>
       </div>
-      <div className="searchbar__suggestions" aria-label="Example queries">
+      {/* role="group" so aria-label is exposed — ARIA ignores it on role-less generics (R-2a) */}
+      <div className="searchbar__suggestions" role="group" aria-label="Example queries">
         {EXAMPLE_QUERIES.map((suggestion) => (
           <button
             key={suggestion}
