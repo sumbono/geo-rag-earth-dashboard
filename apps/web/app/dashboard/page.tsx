@@ -144,6 +144,7 @@ export default function DashboardPage() {
         onSearchStart={handleSearchStart}
         onResults={handleResults}
         onError={handleError}
+        onSuggest={handleSuggest}
       />
       <BboxDraw
         ref={bboxDrawRef}

@@ -5,7 +5,14 @@
  * itself is wrapped (not replaced) so the real component runs against the
  * mock and every `results` prop it receives is recorded for assertions.
  */
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import DashboardPage from "../app/dashboard/page";
 import type { SearchResult } from "../lib/types";
@@ -197,8 +204,10 @@ describe("dashboard search UI", () => {
 
     submitQuery("water");
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    // Scope to the empty-state region: the SearchBar chip shares the name.
     expect(
-      await screen.findByRole("button", { name: "turquoise coastal water" }),
+      await within(screen.getByRole("region", { name: "No results" }))
+        .findByRole("button", { name: "turquoise coastal water" }),
     ).toBeInTheDocument();
   });
 });

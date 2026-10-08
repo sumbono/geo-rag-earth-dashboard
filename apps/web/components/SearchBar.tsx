@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { searchVector } from "../lib/api";
+import { EXAMPLE_QUERIES } from "../lib/suggestions";
 import type { SearchResult } from "../lib/types";
 
 export interface SearchBarProps {
@@ -15,6 +16,8 @@ export interface SearchBarProps {
   onResults: (results: SearchResult[]) => void;
   /** Anything `apiFetch` throws (ApiError, network failure) for the page to render. */
   onError: (error: unknown) => void;
+  /** Example-chip click — the page runs the search (same path as EmptyState). */
+  onSuggest: (query: string) => void;
 }
 
 /**
@@ -31,6 +34,7 @@ export default function SearchBar({
   onSearchStart,
   onResults,
   onError,
+  onSuggest,
 }: SearchBarProps) {
   const [submitting, setSubmitting] = useState(false);
 
@@ -52,28 +56,42 @@ export default function SearchBar({
       role="search"
       onSubmit={handleSubmit}
       noValidate
-      style={{ display: "flex", gap: 8, alignItems: "center" }}
+      style={{ display: "flex", flexDirection: "column", gap: 8 }}
     >
-      <label htmlFor="dashboard-search" style={{ fontWeight: 600 }}>
-        Search
-      </label>
-      <input
-        id="dashboard-search"
-        name="q"
-        type="search"
-        value={query}
-        onChange={(event) => onQueryChange(event.target.value)}
-        placeholder="water, reef, coastline…"
-        autoComplete="off"
-        style={{ flex: 1, minWidth: 0, padding: "8px 10px" }}
-      />
-      <button
-        type="submit"
-        className="button button--primary"
-        disabled={submitting || query.trim() === ""}
-      >
-        {submitting ? "Searching…" : "Search"}
-      </button>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <label htmlFor="dashboard-search" style={{ fontWeight: 600 }}>
+          Search
+        </label>
+        <input
+          id="dashboard-search"
+          name="q"
+          type="search"
+          value={query}
+          onChange={(event) => onQueryChange(event.target.value)}
+          placeholder="water, reef, coastline…"
+          autoComplete="off"
+          style={{ flex: 1, minWidth: 0, padding: "8px 10px" }}
+        />
+        <button
+          type="submit"
+          className="button button--primary"
+          disabled={submitting || query.trim() === ""}
+        >
+          {submitting ? "Searching…" : "Search"}
+        </button>
+      </div>
+      <div className="searchbar__suggestions" aria-label="Example queries">
+        {EXAMPLE_QUERIES.map((suggestion) => (
+          <button
+            key={suggestion}
+            type="button"
+            className="button button--ghost searchbar__chip"
+            onClick={() => onSuggest(suggestion)}
+          >
+            {suggestion}
+          </button>
+        ))}
+      </div>
     </form>
   );
 }
