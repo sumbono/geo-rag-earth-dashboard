@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import BboxDraw, { type BboxDrawHandle } from "../../components/BboxDraw";
 import DetailPanel from "../../components/DetailPanel";
 import EmptyState from "../../components/EmptyState";
@@ -90,6 +90,10 @@ export default function DashboardPage() {
   const [tab, setTab] = useState<Tab>("map");
   const mapRef = useRef<MapHandle | null>(null);
   const bboxDrawRef = useRef<BboxDrawHandle | null>(null);
+  // Focus intent for the next DetailPanel mount (Task 9 fix R1): the tile
+  // `key` remounts the panel on every prev/next, so the pressed button is a
+  // new DOM node — this tells it which button to re-focus.
+  const pendingFocusRef = useRef<"prev" | "next" | null>(null);
 
   /** `searchText` covers suggestion clicks (state not yet flushed); a plain
    *  SearchBar submit passes nothing and reads the live input value. */
@@ -118,8 +122,17 @@ export default function DashboardPage() {
     if (results.length < 2 || selectedId === null) return;
     const index = results.findIndex((result) => result.id === selectedId);
     if (index === -1) return;
+    // Set BEFORE the state update so the remounting panel receives it.
+    pendingFocusRef.current = delta > 0 ? "next" : "prev";
     setSelectedId(results[(index + delta + results.length) % results.length].id);
   }
+
+  // Consume the focus intent after the commit that applied it (child effects
+  // run first, so the panel has already focused). Clearing here means a later
+  // unrelated remount — close/reopen, fresh search — never steals focus.
+  useEffect(() => {
+    pendingFocusRef.current = null;
+  });
 
   function handleError(err: unknown) {
     setError(
@@ -262,6 +275,7 @@ export default function DashboardPage() {
           results={results}
           onClose={() => setSelectedId(null)}
           onNavigate={handlePrevNext}
+          initialFocus={pendingFocusRef.current ?? undefined}
         />
       )}
     </main>

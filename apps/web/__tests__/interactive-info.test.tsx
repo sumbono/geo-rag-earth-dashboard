@@ -220,6 +220,37 @@ describe("detail prev/next", () => {
     expect(onNavigate).not.toHaveBeenCalled();
   });
 
+  it("restores focus to the pressed nav button after the panel remounts", async () => {
+    stubFetch(200, { results });
+    render(<DashboardPage />);
+    submitQuery("water");
+
+    fireEvent.click(await screen.findByRole("button", { name: /0\.91/ }));
+    const next = screen.getByRole("button", { name: "Next result" });
+    // Simulate the browser's click-focus (jsdom does not move focus itself).
+    next.focus();
+    expect(document.activeElement).toBe(next);
+
+    fireEvent.click(next);
+
+    // The tile `key` remounts the panel — focus must land on the NEW node,
+    // not fall back to <body>.
+    const nextAgain = screen.getByRole("button", { name: "Next result" });
+    expect(nextAgain).not.toBe(next);
+    expect(document.activeElement).toBe(nextAgain);
+  });
+
+  it("disables prev/next when fewer than 2 results are selectable", async () => {
+    stubFetch(200, { results: [results[0]] });
+    render(<DashboardPage />);
+    submitQuery("water");
+
+    fireEvent.click(await screen.findByRole("button", { name: /0\.91/ }));
+
+    expect(screen.getByRole("button", { name: "Previous result" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Next result" })).toBeDisabled();
+  });
+
   it("page: Next/Previous cycle the selection with wrap-around", async () => {
     stubFetch(200, { results });
     render(<DashboardPage />);

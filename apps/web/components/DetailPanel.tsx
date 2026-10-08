@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import ScoreBarChart from "./ScoreBarChart";
 import type { SearchResult } from "../lib/types";
 
@@ -15,6 +15,12 @@ export interface DetailPanelProps {
    *  `results.length`. Wired to the header buttons AND ArrowLeft/ArrowRight
    *  on `window` (listener removed on unmount). */
   onNavigate?: (delta: 1 | -1) => void;
+  /** One-shot focus intent (Task 9 fix R1): the page's tile `key` remounts
+   *  this panel on every prev/next, so the pressed button node is destroyed —
+   *  on mount, focus moves to the named button instead of falling back to
+   *  `<body>`. The page clears its intent after that commit, so unrelated
+   *  remounts never steal focus. Optional (finding 13). */
+  initialFocus?: "prev" | "next";
 }
 
 /** Flatten every ring's points into an axis-aligned "W, S → E, N" string. */
@@ -52,10 +58,20 @@ export default function DetailPanel({
   onClose,
   results,
   onNavigate,
+  initialFocus,
 }: DetailPanelProps) {
   const [falseColor, setFalseColor] = useState(false);
   const chartResults = results ?? [tile];
   const thumbSrc = falseColor ? `${tile.thumb_url}?fc=1` : tile.thumb_url;
+  const prevButtonRef = useRef<HTMLButtonElement | null>(null);
+  const nextButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  // Focus restore across the remount (Task 9 fix R1): land on the button the
+  // user just pressed so keyboard/AT users keep their place in the panel.
+  useEffect(() => {
+    if (initialFocus === "next") nextButtonRef.current?.focus();
+    else if (initialFocus === "prev") prevButtonRef.current?.focus();
+  }, [initialFocus]);
 
   // Arrow keys step through results while the panel is open (Task 9). The
   // listener lives here — the panel only mounts when a tile is selected, so
@@ -106,16 +122,22 @@ export default function DetailPanel({
         <h2 style={{ margin: 0, fontSize: "1.05rem" }}>Tile details</h2>
         <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
           <button
+            ref={prevButtonRef}
             type="button"
             aria-label="Previous result"
+            // With fewer than 2 hits there is nothing to cycle — the page
+            // would silently no-op, so say so for assistive tech (fix R1m).
+            disabled={chartResults.length < 2}
             onClick={() => onNavigate?.(-1)}
             style={chipStyle}
           >
             ‹ Previous
           </button>
           <button
+            ref={nextButtonRef}
             type="button"
             aria-label="Next result"
+            disabled={chartResults.length < 2}
             onClick={() => onNavigate?.(1)}
             style={chipStyle}
           >
