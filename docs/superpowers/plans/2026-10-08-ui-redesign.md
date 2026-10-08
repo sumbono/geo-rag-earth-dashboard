@@ -552,7 +552,7 @@ git commit -m "feat: landing restructure — asymmetric hero per approved macros
 ### Task 5: Dashboard design pass — tokens, states, a11y (audit majors #7, minors #11–#13/#15)
 
 **Files:**
-- Modify: `apps/web/app/dashboard/page.tsx`, `apps/web/components/ResultsPanel.tsx`, `apps/web/components/EmptyState.tsx`, `apps/web/components/BboxDraw.tsx` (styles only), `apps/web/components/DetailPanel.tsx`, `apps/web/components/TelemetryChart.tsx` (raw-hex cleanup — Step 3d), `apps/web/app/globals.css` (append dashboard rules), `apps/web/__tests__/search_ui.test.tsx` (row assertion update — Step 3c)
+- Modify: `apps/web/app/dashboard/page.tsx`, `apps/web/components/ResultsPanel.tsx`, `apps/web/components/EmptyState.tsx`, `apps/web/components/BboxDraw.tsx` (styles only), `apps/web/components/DetailPanel.tsx`, `apps/web/components/TelemetryChart.tsx` (raw-hex cleanup — Step 3d), `apps/web/components/SearchBar.tsx` (one-line `role="group"` on the suggestions div — Step 3e, Task 2 rulings R-1a/R-2a), `apps/web/app/globals.css` (append dashboard + guide + searchbar rules), `apps/web/__tests__/search_ui.test.tsx` (row assertion update — Step 3c)
 - Test: `apps/web/__tests__/dashboard-styles.test.tsx` (created)
 
 **Interfaces:**
@@ -616,7 +616,8 @@ Expected: FAIL — `aria-pressed` still present on rows; raw hex found in `dashb
 - `EmptyState.tsx` / `BboxDraw.tsx`: dashed borders → `1px solid var(--color-rule)` (audit #11 — note: `--color-rule`, not the nonexistent `--color-border`, finding 11); fallback-hex vars (`var(--surface, #ffffff)`, `var(--ink-soft, #4a5b6a)`) → `var(--color-paper-2)` / `var(--color-ink-soft)` with **no hex fallbacks**.
 - **Step 3c:** update the row-state assertion in `search_ui.test.tsx` (~:318–320): `toHaveAttribute("aria-pressed", "true")` → `toHaveAttribute("aria-current", "true")` (Rows now use aria-current — coverage-map note for audit #13).
 - **Step 3d (finding 12):** raw-hex cleanup in the two files this task now owns: `TelemetryChart.tsx` (~:156 `#b91c1c` → `var(--color-danger)`) and `DetailPanel.tsx` (`#e1e8ee` → `var(--color-rule)`, `#ffffff` → `var(--color-paper-2)`, `var(--accent, #0b6f8f)` → `var(--color-accent)` with the hex fallback dropped). After this, the color-scan test's file list must ALSO include these two files — update the scan array in `dashboard-styles.test.tsx` to six files.
-- `globals.css` append: the `.results-row`, `.guide` (Task 1 may have added minimal styles — harmonize), `.dash-*` rules with tokens only.
+- `globals.css` append: the `.results-row`, `.guide` + its BEM children (`.guide__title/.guide__steps/.guide__examples-label/.guide__examples` — ruling R-1a: Task 1 shipped the classes unstyled), `.searchbar__suggestions`/`.searchbar__chip` (ruling R-2a: chips currently render flush — add `gap` on the container; Task 2 shipped unstyled), and `.dash-*` rules — tokens only.
+- **Step 3e (ruling R-2a):** `SearchBar.tsx` — the suggestions wrapper is a bare `<div aria-label="Example queries">`; ARIA ignores `aria-label` on role-less generics. Add `role="group"` to that div (one line).
 
 - [ ] **Step 4: Run tests to verify they pass**
 
