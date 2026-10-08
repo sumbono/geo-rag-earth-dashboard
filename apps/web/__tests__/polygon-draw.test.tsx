@@ -13,6 +13,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks(); // R-7a: drop the controlled Date.now spy
 });
 
 function setup() {
@@ -61,9 +62,17 @@ it("Esc clears vertices without sending", () => {
 
 it("double-click near the last vertex closes (no duplicate vertex appended)", () => {
   const { ref, onPolygon } = setup();
+  // Controlled clock (R-7a): the close gesture's <250ms window must not
+  // depend on wall-clock time — each click advances the fake clock ~20ms,
+  // so clicks 3→4 are always inside the window even on a loaded worker.
+  let now = 1_000_000;
+  vi.spyOn(Date, "now").mockImplementation(() => now);
   ref.current!.handleMapClick([39.0, 21.0]);
+  now += 20;
   ref.current!.handleMapClick([39.1, 21.0]);
+  now += 20;
   ref.current!.handleMapClick([39.05, 21.1]);
+  now += 20;
   // second rapid click ~20ms later, 1e-7° from the last vertex → close, not append
   ref.current!.handleMapClick([39.05 + 1e-7, 21.1 + 1e-7]);
   expect(onPolygon).toHaveBeenCalledWith([[39.0, 21.0], [39.1, 21.0], [39.05, 21.1]]);
