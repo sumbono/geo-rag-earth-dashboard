@@ -4,8 +4,9 @@
  * BboxDraw is rendered directly with a ref handle, so no maplibre mock is
  * needed here: these tests pin the callback contract (`onPreview` /
  * `onRectangle`) that the page forwards to the map's preview + persisted
- * layers — including the corner-B sequence from finding 8:
- * preview(completed) → onRectangle(completed) → preview(null) → POST.
+ * layers — including the corner-B sequence (finding 8 as amended by R-6a):
+ * preview(completed) → onRectangle(completed) → POST, with no same-tick
+ * preview clear so the dashed box actually stays painted.
  */
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -37,14 +38,16 @@ function setup() {
   return { ref, onPreview, onRectangle, onResults, onError };
 }
 
-it("click 1 previews the degenerate box; click 2 previews the completed box, hands off to onRectangle, then clears the preview", () => {
+it("click 1 previews the degenerate box; click 2 previews the completed box and hands off to onRectangle (preview persists)", () => {
   const { ref, onPreview, onRectangle } = setup();
   ref.current!.handleMapClick([39.0, 21.0]);
   expect(onPreview).toHaveBeenLastCalledWith([[39, 21], [39, 21]]);
   ref.current!.handleMapClick([39.2, 21.2]);
-  // exact sequence at corner B (finding 8): preview(completed) → onRectangle(completed) → preview(null) → POST
+  // R-6a sequence at corner B: preview(completed) → onRectangle(completed) →
+  // POST — NO same-tick preview clear, so the dashed box keeps painting
+  // (stacked under the persisted rectangle) and survives a fetch error.
   expect(onPreview).toHaveBeenCalledWith([[39.0, 21.0], [39.2, 21.2]]);
-  expect(onPreview).toHaveBeenLastCalledWith(null);
+  expect(onPreview).toHaveBeenLastCalledWith([[39.0, 21.0], [39.2, 21.2]]);
   expect(onRectangle).toHaveBeenCalledWith([[39.0, 21.0], [39.2, 21.2]]);
 });
 

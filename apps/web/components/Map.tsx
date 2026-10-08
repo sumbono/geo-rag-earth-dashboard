@@ -42,6 +42,7 @@ const MARKERS_LAYER = "result-markers";
 const RECTANGLE_FILL_LAYER = "draw-rectangle";
 const RECTANGLE_LINE_LAYER = "draw-rectangle-outline";
 const PREVIEW_LINE_LAYER = "draw-preview";
+const PREVIEW_DOT_LAYER = "draw-preview-dot";
 
 /**
  * Brand accent as a paint literal (finding 17): maplibre paint properties
@@ -59,7 +60,8 @@ const EMPTY_FC: FeatureCollection = {
 /** ESRI World Imagery basemap + OSM streets overlay (hidden until toggled)
  *  + an empty GeoJSON source for the score-colored result markers
  *  + an empty GeoJSON source for the drawn search rectangle (Task 19)
- *  + an empty GeoJSON source for the dashed in-progress preview (Task 6). */
+ *  + an empty GeoJSON source for the live draw preview — corner-A dot and
+ *    dashed box (Task 6, R-6a). */
 const style: StyleSpecification = {
   version: 8,
   sources: {
@@ -111,15 +113,33 @@ const style: StyleSpecification = {
       paint: { "line-color": "#2563eb", "line-width": 2 },
     },
     {
-      // Dashed live preview of the in-progress box (Task 6) — sits above the
-      // persisted rectangle so the hand-off flicker reads as intentional.
+      // Dashed live preview of the in-progress box (Task 6, R-6a): from
+      // corner B it persists exactly under the persisted rectangle (identical
+      // geometry stacked = no artifact), so a failed fetch still shows the
+      // drawn box next to the alert. Polygons only — Points are the dot's.
       id: PREVIEW_LINE_LAYER,
       type: "line",
       source: PREVIEW_SOURCE,
+      filter: ["!=", ["geometry-type"], "Point"],
       paint: {
         "line-color": ACCENT_HEX,
         "line-width": 2,
         "line-dasharray": [2, 2],
+      },
+    },
+    {
+      // R-6a corner-A dot: the degenerate click-1 box is stored as a Point
+      // feature (a zero-length ring paints nothing), and circle buckets draw
+      // EVERY vertex of every feature they receive — hence the Point-only
+      // filter, or the completed box would bloom with dots at its corners.
+      id: PREVIEW_DOT_LAYER,
+      type: "circle",
+      source: PREVIEW_SOURCE,
+      filter: ["==", ["geometry-type"], "Point"],
+      paint: {
+        "circle-radius": 5,
+        "circle-color": ACCENT_HEX,
+        "circle-opacity": 0.9,
       },
     },
     {
@@ -203,14 +223,36 @@ function toRectangleCollection(bbox: Bbox): FeatureCollection {
   };
 }
 
+/** Preview geometry for a box: a Point when it is degenerate (click 1's
+ *  `[lonLat, lonLat]`, or a same-point corner B) so the circle layer can
+ *  paint the visible corner-A dot — a zero-length ring draws nothing. Any
+ *  other box is the closed ring the dashed line layer strokes. */
+function toPreviewCollection(bbox: Bbox): FeatureCollection {
+  const [[w, s], [e, n]] = bbox;
+  if (w === e && s === n) {
+    return {
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          geometry: { type: "Point", coordinates: [w, s] },
+          properties: {},
+        } satisfies Feature,
+      ],
+    };
+  }
+  return toRectangleCollection(bbox);
+}
+
 /** Imperative map handles (Task 19): render/clear the drawn search rectangle;
- *  Task 6 adds the dashed, non-persisted in-progress preview. */
+ *  Task 6 adds the live dashed preview (R-6a). */
 export interface MapHandle {
   /** Draw the given box, or pass `null` to clear it (empty GeoJSON data). */
   setRectangle: (bbox: Bbox | null) => void;
-  /** Draw (or clear with `null`) the dashed `draw-preview` layer — the live
-   *  box between corner A and the hand-off at corner B. Distinct from the
-   *  persisted `draw-rectangle` layer; both die with `map.remove()`. */
+  /** Draw (or clear with `null`) the live preview: a dot at corner A, then
+   *  the dashed `draw-preview` box — which from corner B persists (stacked
+   *  under the persisted rectangle) until the page clears it on Esc/re-arm.
+   *  Distinct from the `draw-rectangle` layer; both die with `map.remove()`. */
   setPreviewRectangle: (bbox: Bbox | null) => void;
 }
 
@@ -237,8 +279,10 @@ export interface MapProps {
  * `onMapClick` (the page only supplies one while draw mode is armed), and the
  * ref handle `setRectangle(bbox | null)` renders or clears the search box on
  * the dedicated GeoJSON source. Task 6 adds `setPreviewRectangle(bbox | null)`
- * driving the dashed `draw-preview` layer. All listeners die with
- * `map.remove()` (which takes the style — sources and layers — with it).
+ * driving the live preview: the `draw-preview-dot` circle at corner A and the
+ * dashed `draw-preview` box that persists from corner B (R-6a). All
+ * listeners die with `map.remove()` (which takes the style — sources and
+ * layers — with it).
  */
 export default function Map({ results, onPick, onMapClick, ref }: MapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -259,13 +303,14 @@ export default function Map({ results, onPick, onMapClick, ref }: MapProps) {
   function applyBox(
     sourceId: string,
     boxRef: { current: Bbox | null },
+    toCollection: (bbox: Bbox) => FeatureCollection,
   ): void {
     const map = mapRef.current;
     if (!map) return;
     const apply = () => {
       const current = boxRef.current;
       const source = map.getSource(sourceId) as GeoJSONSource | undefined;
-      source?.setData(current ? toRectangleCollection(current) : EMPTY_FC);
+      source?.setData(current ? toCollection(current) : EMPTY_FC);
     };
     if (map.getSource(sourceId)) apply();
     else map.once("load", apply);
@@ -274,11 +319,11 @@ export default function Map({ results, onPick, onMapClick, ref }: MapProps) {
   useImperativeHandle(ref, () => ({
     setRectangle(bbox: Bbox | null) {
       rectangleRef.current = bbox;
-      applyBox(RECTANGLE_SOURCE, rectangleRef);
+      applyBox(RECTANGLE_SOURCE, rectangleRef, toRectangleCollection);
     },
     setPreviewRectangle(bbox: Bbox | null) {
       previewRectangleRef.current = bbox;
-      applyBox(PREVIEW_SOURCE, previewRectangleRef);
+      applyBox(PREVIEW_SOURCE, previewRectangleRef, toPreviewCollection);
     },
   }), []);
 

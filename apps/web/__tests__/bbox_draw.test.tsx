@@ -333,6 +333,36 @@ describe("bbox draw search", () => {
     expect(last.features).toEqual([]);
   });
 
+  it("ships a dashed draw-preview line layer plus the R-6a corner-A dot circle layer", () => {
+    stubFetch({});
+    render(<DashboardPage />);
+
+    // The Map mock hands the raw style through, so the layer set is observable.
+    const style = hoisted.mapInstances[0].options.style;
+    const line = style.layers.find((l: any) => l.id === "draw-preview");
+    expect(line).toMatchObject({
+      type: "line",
+      source: "preview",
+      paint: { "line-color": "#0b6f8f", "line-dasharray": [2, 2] },
+      // Only polygons: a Point on a line layer would draw nothing anyway,
+      // but the explicit filter keeps the two preview layers disjoint.
+      filter: ["!=", ["geometry-type"], "Point"],
+    });
+    const dot = style.layers.find((l: any) => l.id === "draw-preview-dot");
+    expect(dot).toMatchObject({
+      type: "circle",
+      source: "preview",
+      // Circle buckets paint EVERY vertex of every feature they receive
+      // (maplibre CircleBucket.addFeature), so the dot layer must be filtered
+      // to Point features or the completed box would bloom with corner dots.
+      filter: ["==", ["geometry-type"], "Point"],
+      paint: { "circle-radius": 5, "circle-color": "#0b6f8f", "circle-opacity": 0.9 },
+    });
+    // Distinct from the persisted layer, and its source starts empty.
+    expect(style.layers.some((l: any) => l.id === "draw-rectangle")).toBe(true);
+    expect(style.sources.preview.data.features).toEqual([]);
+  });
+
   it("shows the empty state when a bbox search returns nothing", async () => {
     stubFetch({ "/api/search/bbox": { results: [] } });
     render(<DashboardPage />);

@@ -20,8 +20,9 @@ export interface BboxDrawProps {
   onResults: (results: SearchResult[]) => void;
   /** Hands the completed box to the page so it can draw the rectangle. */
   onRectangle: (bbox: Bbox) => void;
-  /** Live preview of the in-progress box (degenerate at corner A, full at
-   *  corner B) — `null` clears the dashed preview layer (Task 6). */
+  /** Live preview of the in-progress box: a dot at corner A, the dashed box
+   *  from corner B onward (it persists — R-6a). `null` clears the preview
+   *  layer (Esc / toggle-off). */
   onPreview: (bbox: Bbox | null) => void;
   /** Anything `apiFetch` throws — surfaced by the page as its alert. */
   onError: (error: unknown) => void;
@@ -33,16 +34,17 @@ export interface BboxDrawProps {
  *
  * The "Draw area" toggle arms the mode; the page forwards map clicks here
  * while it is armed. Click 1 records corner A (temp point/line + coordinates
- * in the status strip) and previews the degenerate box on the map. Click 2
- * normalizes the pair into an ordered `[[w,s],[e,n]]`, then — visual-first
- * (finding 8) — flashes the completed box on the preview layer, hands it to
- * `onRectangle` so the persisted rectangle is on the map immediately,
- * clears the preview, and only then POSTs once to `/api/search/bbox` with
- * `q: currentQuery || null`, lifting the hits into the panel. On fetch error
- * the rectangle stays (the user sees what they drew) and the page's alert
- * explains the failure. Esc aborts the in-progress rectangle without any
- * request (the tool stays armed); toggling the button off mid-draw also
- * drops corner A. The toggle disarms itself once a draw completes.
+ * in the status strip) and previews the degenerate box on the map (a Point —
+ * the preview dot layer paints it). Click 2 normalizes the pair into an
+ * ordered `[[w,s],[e,n]]`, then — visual-first (finding 8, R-6a) — emits
+ * `onPreview(completedBox)` → `onRectangle(completedBox)` → POST. There is
+ * deliberately NO preview clear in that tick: the dashed preview box keeps
+ * painting, exactly overlaid by the persisted rectangle (identical geometry
+ * stacked = no artifact), and on fetch error both stay visible next to the
+ * page's alert. The preview is cleared by Esc or by toggling the tool off.
+ * Esc aborts the in-progress rectangle without any request (the tool stays
+ * armed); toggling the button off mid-draw also drops corner A. The toggle
+ * disarms itself once a draw completes.
  */
 export default function BboxDraw({
   active,
@@ -89,9 +91,10 @@ export default function BboxDraw({
         },
       );
       onResults(data.results);
-      // The rectangle is NOT emitted here: visual-first (finding 8) hands it
-      // to the map at corner B, before the request leaves, so a failed
-      // search keeps the drawn box on screen and only raises the alert.
+      // The rectangle is NOT emitted here: visual-first (finding 8, R-6a)
+      // hands it to the map at corner B, before the request leaves, so a
+      // failed search keeps the drawn box (and its dashed preview) on screen
+      // and only raises the alert.
     } catch (error) {
       onError(error);
     }
@@ -112,11 +115,12 @@ export default function BboxDraw({
     ];
     setCorner(null);
     onToggle(); // one draw per arm — disarm before the request leaves
-    // Exact corner-B sequence (finding 8): preview(completed) → persisted
-    // rectangle takes over → preview cleared → POST.
+    // Corner-B sequence (finding 8, amended by R-6a): preview(completed) →
+    // persisted rectangle (stacked on top) → POST. No same-tick preview
+    // clear — that would race maplibre's render and paint nothing; the
+    // dashed box persists until Esc or a re-arm clears it.
     onPreview(bbox);
     onRectangle(bbox);
-    onPreview(null);
     void runSearch(bbox);
   }
 
