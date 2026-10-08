@@ -12,11 +12,11 @@
 
 ## Global Constraints
 
-- All suites stay green at every task boundary: `cd apps/api && ../.venv/bin/pytest -q -m "not ml"` (75+), `cd etl && ../.venv/bin/pytest -q -m "not smoke"` (38+), `cd apps/web && npm test` (70+), `npx tsc --noEmit`, `npm run build`, `.venv/bin/ruff check .` (exit 0).
+- All suites stay green at every task boundary: `cd apps/api && ../../.venv/bin/pytest -q -m "not ml"` (75+), `cd etl && ../.venv/bin/pytest -q -m "not smoke"` (38+), `cd apps/web && npm test` (70+), `npx tsc --noEmit`, `npm run build`, `.venv/bin/ruff check .` (exit 0).
 - E2E selectors that must keep working (Task 10 runs them): heading `Geo-RAG Earth Dashboard`, `data-testid="gif-slot"`, `data-testid="demo-access-card"`, GitHub link name `/github repository/i`, login link, `aria-pressed` tab buttons, `OSM streets` toggle, dashboard search submit flow.
 - **No new runtime dependencies.** Three font families via `next/font/google` are allowed — Space Grotesk, Inter, JetBrains Mono (design.md Typography; plan's earlier "two families" amended by user confirmation 2026-10-08); no npm packages, no pip packages.
 - **`design.md` (repo root) is the binding design system** for every visual decision in Tasks 3–5: tokens, type, radii (6px control / 10px card), hairline structure, accent teal, mono data values, stamps. Where this plan and `design.md` disagree, `design.md` wins.
-- After Task 3: every color/font/easing/focus value in `apps/web` CSS references a `tokens.css` token — no inline hex/OKLCH in TSX `style={{}}` for colors (layout-only inline styles tolerated where a token adds nothing); `--color-danger` is the only red; `#1d4ed8` is removed from the palette entirely.
+- **After Task 5** (end-of-plan, not after Task 3 — finding 12): every color/font/easing/focus value in `apps/web` CSS references a `tokens.css` token — no inline hex/OKLCH/rgb(a) in TSX `style={{}}` or component literals for CSS-applied colors (**exemption:** maplibre *paint property* constants inside `Map.tsx`/`View3D.tsx` — CSS vars don't resolve there; they must be named shared constants, e.g. `const ACCENT = "#0b6f8f"`, never magic literals scattered). `--color-danger` is the only red; `#1d4ed8` is removed from the palette entirely. The color-scan test (Task 5) is the enforcement point for its six dashboard files.
 - API constants unchanged: `LIMIT 12` clamp on every search endpoint; UTC timestamps; SearchResult shape `{id, thumb_url, bbox, score, captured_at}` unchanged for the existing endpoints.
 - Scrub rule: no application/job-targeting wording anywhere in UI copy, docs, or commits.
 - Commit messages end with: `Co-Authored-By: Claude Code <noreply@anthropic.com>`
@@ -29,7 +29,7 @@
 2. **First-run guidance that never leaves** — a user who has run a search must not keep seeing "How this works" over their results; a reload before any search SHOULD show it again (no persistence required). → pinned in Task 1: hidden once `results.length > 0` or `searched === true`, shown again on fresh mount.
 3. **Redesign breaking the live e2e contract** — the Walkthrough e2e and recording rely on stable roles/testids while Tasks 3–5 restructure markup. → pinned in Task 4 (every protected selector preserved, asserted by a preserved-landmarks test) and Task 10 (full Playwright run).
 4. **Hover cross-highlight leaks or flicker** — map/3D listeners re-bound on every `results` update would leak or thrash on repeated hovers. → pinned in Task 9: hover state is a single `hoveredId` prop (no per-result listeners), plus an unmount-cleanup test on the popup listener.
-5. **Polygon e2e racing the map** — canvas clicks before the style loads no-op (the bbox e2e already waits; polygon must too). → pinned in Task 10: `waitFor` on map load sentinel before vertex clicks, mirroring the existing bbox steps.
+5. **Polygon e2e racing the map** — canvas clicks before the style loads no-op silently. → pinned in Task 10: after click 1, wait for the status strip matching `/^1 vertex —/` (Task 7 pins that exact singular format) with a 15s timeout — a cold stack fails loudly there instead of timing out on the response; no blind `waitForTimeout`.
 
 ---
 
@@ -60,7 +60,6 @@ apps/api/
 ├── app/routers/search.py            # T8: POST /search/polygon
 └── tests/test_search_polygon.py     # T8: created
 docs/
-├── redesign-decisions.md            # T3: created — approved Hallmark decisions
 ├── screenshots/, demo.gif           # T10: regenerated
 └── superpowers/plans/2026-10-08-ui-redesign.md   # this file
 ```
@@ -71,7 +70,7 @@ docs/
 
 **Files:**
 - Create: `apps/web/lib/suggestions.ts`, `apps/web/components/FirstRunGuide.tsx`, `apps/web/__tests__/guidance.test.tsx`
-- Modify: `apps/web/components/EmptyState.tsx` (import shared constant), `apps/web/app/dashboard/page.tsx` (render guide)
+- Modify: `apps/web/components/EmptyState.tsx` (import shared constant), `apps/web/app/dashboard/page.tsx` (render guide), `apps/web/__tests__/detail_panel.test.tsx` (first-visit assertion — Step 3b)
 
 **Interfaces:**
 - Consumes: page state `searched: boolean`, `results: SearchResult[]`, existing `handleSuggest(suggested: string)` on the page.
@@ -81,16 +80,81 @@ docs/
 
 ```tsx
 // apps/web/__tests__/guidance.test.tsx
-import { fireEvent, render, screen } from "@testing-library/react";
-import { vi } from "vitest";
+// vitest has NO globals:true — every file imports its own bindings (repo convention).
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import FirstRunGuide from "../components/FirstRunGuide";
+import DashboardPage from "../app/dashboard/page";
+import type { SearchResult } from "../lib/types";
+
+// maplibre-gl needs WebGL → mocked wholesale (same boilerplate as search_ui.test.tsx)
+const hoisted = vi.hoisted(() => {
+  const mapInstances: any[] = [];
+  class MockMap {
+    options: any;
+    setData = vi.fn();
+    on = vi.fn();
+    once = vi.fn();
+    remove = vi.fn();
+    isStyleLoaded = vi.fn(() => true);
+    getSource = vi.fn((id?: string) => (id === "results" ? { setData: this.setData } : undefined));
+    setLayoutProperty = vi.fn();
+    setPaintProperty = vi.fn();
+    getSourceRange = undefined;
+    queryRenderedFeatures = vi.fn(() => []);
+    setLayoutProperty2 = undefined;
+    flyTo = vi.fn();
+    constructor(options: any) {
+      this.options = options;
+      mapInstances.push(this);
+    }
+  }
+  class MockPopup {
+    setLngLat = vi.fn((): any => this);
+    setHTML = vi.fn((): any => this);
+    setDOMContent = vi.fn((): any => this);
+    addTo = vi.fn((): any => this);
+    remove = vi.fn();
+  }
+  return { MockMap, MockPopup, mapInstances };
+});
+vi.mock("maplibre-gl", () => ({
+  default: { Map: hoisted.MockMap, Popup: hoisted.MockPopup },
+  Map: hoisted.MockMap,
+  Popup: hoisted.MockPopup,
+  setWorkerUrl: vi.fn(),
+  Marker: vi.fn(() => ({ setLngLat: vi.fn().mockReturnThis(), addTo: vi.fn().mockReturnThis(), remove: vi.fn(), setPopup: vi.fn().mockReturnThis() })),
+  LngLatBounds: vi.fn(),
+}));
+
+// fetch harness (api.test.ts convention): stub globally, restore per test
+const fetchMock = vi.fn<typeof fetch>();
+beforeEach(() => {
+  fetchMock.mockReset();
+  fetchMock.mockResolvedValue(
+    new Response(JSON.stringify({ results: [] }), { status: 200, headers: { "Content-Type": "application/json" } }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+const ONE_RESULT: SearchResult = {
+  id: "11111111-1111-1111-1111-111111111111",
+  thumb_url: "/api/thumbs/11111111-1111-1111-1111-111111111111",
+  bbox: [[[39, 21], [39.1, 21], [39.1, 21.1], [39, 21.1], [39, 21]]],
+  score: 0.91,
+  captured_at: "2025-09-29T08:04:26Z",
+};
 
 describe("FirstRunGuide", () => {
   it("renders the how-it-works steps and the value explainer when visible", () => {
     render(<FirstRunGuide visible onSuggest={() => {}} />);
     expect(screen.getByRole("heading", { name: /how this works/i })).toBeInTheDocument();
-    expect(screen.getByText(/score/i)).toHaveTextContent(/0/i); // score 0–1 explained
-    expect(screen.getByText(/capture date/i)).toBeInTheDocument();
+    // RTL getByText matches direct text nodes — pin through the <li> wrapper:
+    expect(screen.getByText(/score/i).closest("li")).toHaveTextContent(/0\.00/);
+    expect(screen.getByText(/capture date/i).closest("li")).toBeInTheDocument();
   });
 
   it("renders nothing when not visible", () => {
@@ -105,28 +169,28 @@ describe("FirstRunGuide", () => {
     expect(onSuggest).toHaveBeenCalledWith("turquoise coastal water");
   });
 });
-```
 
-Page-level test (appended to `apps/web/__tests__/guidance.test.tsx`), mocking fetch with the repo harness (`vi.stubGlobal("fetch", fetchMock)` per `api.test.ts`, restored in `afterEach(() => vi.unstubAllGlobals())`):
+describe("dashboard first run", () => {
+  it("shows the guide before the first search, hides it once results exist", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ results: [ONE_RESULT] }), { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+    render(<DashboardPage />);
+    expect(screen.getByRole("heading", { name: /how this works/i })).toBeInTheDocument();
+    expect(screen.queryByText("No results")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("searchbox", { name: /search/i }), { target: { value: "water" } });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("0.91")).toBeInTheDocument();  // result row (testid exists only from Task 5)
+    expect(screen.queryByRole("heading", { name: /how this works/i })).not.toBeInTheDocument();
+  });
 
-```tsx
-import DashboardPage from "../app/dashboard/page";
-// fetchMock resolves: POST /api/search/vector → { results: [ ...one SearchResult ] }
-
-it("shows the guide before the first search and hides it once results exist", async () => {
-  render(<DashboardPage />);
-  expect(screen.getByRole("heading", { name: /how this works/i })).toBeInTheDocument();
-  fireEvent.change(screen.getByRole("searchbox", { name: /search/i }), { target: { value: "water" } });
-  fireEvent.click(screen.getByRole("button", { name: "Search" }));
-  await screen.findByTestId("result-row");
-  expect(screen.queryByRole("heading", { name: /how this works/i })).not.toBeInTheDocument();
-});
-
-it("shows the guide again on a fresh mount with no prior search", () => {
-  const { unmount } = render(<DashboardPage />);
-  unmount();
-  render(<DashboardPage />);
-  expect(screen.getByRole("heading", { name: /how this works/i })).toBeInTheDocument();
+  it("shows the guide again on a fresh mount with no prior search", () => {
+    const { unmount } = render(<DashboardPage />);
+    unmount();
+    render(<DashboardPage />);
+    expect(screen.getByRole("heading", { name: /how this works/i })).toBeInTheDocument();
+  });
 });
 ```
 
@@ -202,6 +266,15 @@ export default function FirstRunGuide({ visible, onSuggest }: FirstRunGuideProps
 )}
 ```
 
+- [ ] **Step 3b: Fix the pre-existing first-visit assertion the guide breaks**
+
+`apps/web/__tests__/detail_panel.test.tsx:206–209` asserts the absence of the "turquoise coastal water" **button** on first render — the guide now renders exactly that button, so the suite would be red at this task's boundary. Rewrite the two lines to preserve the test's real intent (no *empty state* before a search), without touching the later suggestion-flow assertions in the same file (those are fixed in Task 2):
+
+```tsx
+    // First visit: no search has run, so no empty state (guide chips may show).
+    expect(screen.queryByText("No results")).not.toBeInTheDocument();
+```
+
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cd apps/web && npx vitest run __tests__/guidance.test.tsx __tests__/login.test.tsx`
@@ -219,7 +292,7 @@ git commit -m "feat: first-run guidance panel with value explainer and example q
 ### Task 2: Always-visible search suggestion chips (audit critical #4)
 
 **Files:**
-- Modify: `apps/web/components/SearchBar.tsx`
+- Modify: `apps/web/components/SearchBar.tsx`, `apps/web/__tests__/detail_panel.test.tsx`, `apps/web/__tests__/search_ui.test.tsx`, `apps/web/__tests__/bbox_draw.test.tsx` (chip-ambiguity scoping — Step 4)
 - Test: `apps/web/__tests__/search-suggestions.test.tsx` (created)
 
 **Interfaces:**
@@ -293,15 +366,46 @@ Add `import { EXAMPLE_QUERIES } from "../lib/suggestions";` and render between t
 
 Wrap the form contents in `flex-direction: column` row structure only if needed — keep the input+submit on one line, chips on the next (adjust the form's `style` to `display: "flex", flexDirection: "column", gap: 8` with an inner row div for input+button). In `dashboard/page.tsx`, pass `onSuggest={handleSuggest}` to `<SearchBar />`.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [ ] **Step 4: Fix the five pre-existing assertions that always-visible chips break**
+
+After any *empty* search there are now **two** buttons per example name (SearchBar chip + EmptyState suggestion), and chips exist pre-search — these existing tests hit strict-mode "found multiple elements" (or a vanished absence-assert). Scope them to the EmptyState section (its `aria-label="No results"` region) — add `within` to each file's RTL import if missing:
+
+```tsx
+// detail_panel.test.tsx — the three post-submit suggestion finds (~:214/:217/:220)
+const empty = () => within(screen.getByRole("region", { name: "No results" }));
+expect(await empty().findByRole("button", { name: "turquoise coastal water" })).toBeInTheDocument();
+expect(empty().getByRole("button", { name: "desert near shoreline" })).toBeInTheDocument();
+expect(empty().getByRole("button", { name: "cloud patterns" })).toBeInTheDocument();
+
+// detail_panel.test.tsx — suggestion click (~:252): click the EmptyState copy
+const suggestion = await within(screen.getByRole("region", { name: "No results" }))
+  .findByRole("button", { name: "turquoise coastal water" });
+fireEvent.click(suggestion);
+
+// search_ui.test.tsx (~:201) — same scoping on its post-submit find
+expect(
+  await within(screen.getByRole("region", { name: "No results" }))
+    .findByRole("button", { name: "turquoise coastal water" }),
+).toBeInTheDocument();
+
+// bbox_draw.test.tsx (~:348) — same scoping
+expect(
+  await within(screen.getByRole("region", { name: "No results" }))
+    .findByRole("button", { name: "turquoise coastal water" }),
+).toBeInTheDocument();
+```
+
+(The first-visit absence assertion in `detail_panel.test.tsx` is already rewritten in Task 1 Step 3b.)
+
+- [ ] **Step 5: Run tests to verify they pass**
 
 Run: `cd apps/web && npm test`
-Expected: PASS — all files (guidance + existing search_ui tests still green: SearchBar's single-POST contract unchanged for typed submits)
+Expected: PASS — all files (guidance + the four updated files; SearchBar's single-POST contract for typed submits unchanged)
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add apps/web/components/SearchBar.tsx apps/web/app/dashboard/page.tsx apps/web/__tests__/search-suggestions.test.tsx
+git add apps/web/components/SearchBar.tsx apps/web/app/dashboard/page.tsx apps/web/__tests__/search-suggestions.test.tsx apps/web/__tests__/detail_panel.test.tsx apps/web/__tests__/search_ui.test.tsx apps/web/__tests__/bbox_draw.test.tsx
 git commit -m "feat: always-visible example-query chips under the search bar"
 ```
 
@@ -311,7 +415,7 @@ git commit -m "feat: always-visible example-query chips under the search bar"
 
 **Files:**
 - Controller gate (Step 1) — no files
-- Create: `apps/web/tokens.css`, `docs/redesign-decisions.md`
+- Create: `apps/web/tokens.css`
 - Modify: `apps/web/app/layout.tsx` (font + token import), `apps/web/app/globals.css` (append-only migration of base rules)
 
 **Interfaces:**
@@ -346,9 +450,16 @@ const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono-local",
 //   className={`${display.variable} ${body.variable} ${mono.variable}`}
 ```
 
+> **Build-time network note (finding 26):** `next/font/google` fetches these
+> fonts at **build time** — `npm run build` and the Docker image build require
+> network (or a warm Next font cache). Record this in the README's
+> troubleshooting note; if a deployment target ever turns out to be
+> network-restricted at build, switch to `next/font/local` with vendored
+> woff2 files (same three variable names — no other code changes).
+
 - [ ] **Step 4: Migrate `globals.css` onto the system (in-place edit; no file deletions)**
 
-1. **Kill the legacy token block and legacy names.** Delete the old `:root` (`globals.css:1-12` — `--bg/--surface/--ink/--accent/...`) and mechanically rename every reference in the file to the `design.md` names: `var(--bg)` → `var(--color-paper)`, `var(--surface)` → `var(--color-paper-2)`, `var(--ink)` → `var(--color-ink)`, `var(--ink-soft)` → `var(--color-ink-soft)`, `var(--accent)` → `var(--color-accent)`, `var(--accent-strong)` → `var(--color-accent-strong)`, `var(--accent-soft)` → `var(--color-accent-soft)`, `var(--border)` → `var(--color-rule)`, `var(--radius)` → `var(--radius-card)`. (JSX files also carry `var(--surface, #ffffff)`-style fallbacks — Task 5 removes those; here fix only `globals.css`.)
+1. **Kill the legacy token block and legacy names.** Delete the old `:root` (`globals.css:1-12` — `--bg/--surface/--ink/--accent/...`) and mechanically rename every reference in the file to the `design.md` names: `var(--bg)` → `var(--color-paper)`, `var(--surface)` → `var(--color-paper-2)`, `var(--ink)` → `var(--color-ink)`, `var(--ink-soft)` → `var(--color-ink-soft)`, `var(--accent)` → `var(--color-accent)`, `var(--accent-strong)` → `var(--color-accent-strong)`, `var(--accent-soft)` → `var(--color-accent-soft)`, `var(--border)` → `var(--color-rule)`, `var(--radius)` → `var(--radius-card)`, **`var(--shadow)` → `var(--shadow-lift)`** (finding 18 — legacy `--shadow` is consumed at `:126/:226/:281`; without the rename the declarations go invalid and silently drop). (JSX files also carry `var(--surface, #ffffff)`-style fallbacks — Task 5 removes those; here fix only `globals.css`.)
 2. `body { background: var(--color-paper); color: var(--color-ink-2); font-family: var(--font-body); }` — **delete the `linear-gradient`** at `:25` (audit #8). Never `#fff`/`#000` (design.md).
 3. Headings (`h1, h2, h3`, `.hero h1`, `.auth__card h1`): `font-family: var(--font-display); font-style: normal; letter-spacing: -0.02em;` (roman always).
 4. `.button` (audit #9 + design.md radii): `border-radius: var(--radius-control); transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);` (kills browser `ease` and the old 999px pills — Cobalt bans pill CTAs). Primary: `background: var(--color-accent); color: var(--color-accent-ink);` hover → `var(--color-accent-strong)`. Ghost: hairline `var(--color-rule-2)` border, ink text.
@@ -374,7 +485,7 @@ Expected: all PASS — existing tests assert behavior, not colors; if any test a
 - [ ] **Step 6: Commit**
 
 ```bash
-git add apps/web/tokens.css apps/web/app/layout.tsx apps/web/app/globals.css docs/redesign-decisions.md
+git add apps/web/tokens.css apps/web/app/layout.tsx apps/web/app/globals.css
 git commit -m "feat: design-system foundation — tokens, font pairing, flat paper, focus rings, easing"
 ```
 
@@ -387,7 +498,7 @@ git commit -m "feat: design-system foundation — tokens, font pairing, flat pap
 - Test: `apps/web/__tests__/landing.test.tsx` (extend)
 
 **Interfaces:**
-- Consumes: approved macrostructure + archetypes (`docs/redesign-decisions.md`), tokens from Task 3.
+- Consumes: `design.md` (locked macrostructure families, nav/footer specs) and the tokens from Task 3.
 - Produces: restructured landing that PRESERVES these landmarks exactly (e2e + tests depend): `<h1>` text `Geo-RAG Earth Dashboard`, `data-testid="gif-slot"` figure with `src="/demo.gif"`, `data-testid="demo-access-card"` with both creds + "Public sandbox with sample data", header GitHub link `href="https://github.com/sumbono/geo-rag-earth-dashboard"` with `target/rel/aria-label`, `Link` to `/login` (Get started + Log in), footer present.
 
 - [ ] **Step 1: Write the failing landmark-preservation test (first — pins the contract the redesign must not break)**
@@ -416,11 +527,11 @@ Expected: PASS (guards against regression during Step 3)
 
 New landing structure, in DOM order (all values via tokens; no new hex):
 
-1. **Bordered nav** (design.md nav): flush full-width, `border-bottom: var(--rule)`, wordmark left (`--font-display`, 600) + text links; right side = GitHub link + **Log in** as the one solid accent button (`--radius-control`). No floating pill, no `⌘K` (known omission).
+1. **Bordered nav** (design.md § Nav and footer): flush full-width, `border-bottom: var(--rule)`, wordmark left (`--font-display`, 600); right side = GitHub link + **Log in as a hairline/ghost button** — never a second solid fill: accent discipline is exactly ONE solid accent button per viewport, and that button is the hero's "Get started" (finding 25). No floating pill, no `⌘K` (known omission).
 2. **Hero — two-column, title LEFT / proof RIGHT** (genre-canonical, kills audit #1's centering): left = `<h1>` "Geo-RAG Earth Dashboard" (`var(--font-display)`, `var(--text-display)`, ≤50 chars — current is fine) + lede (the existing pitch, kept) + actions (solid "Get started" → `/login`, typographic "Log in" secondary); right = the **demo-access card** (keeps `data-testid="demo-access-card"` + exact creds + "Public sandbox with sample data" copy). `.hero { text-align: center }` and the `.hero__eyebrow` pill are deleted (template furniture — audit #1).
 3. **Workbench band**: the walkthrough GIF in a hairline-framed full-width figure — this is the hero *proof* (keeps `data-testid="gif-slot"`, `src="/demo.gif"`, width/height attrs).
 4. **One dark graphite band** (design.md signature 8): "How it works" — 3 numbered steps (describe in plain words → ranked by score 0–1 → click for details/imagery/location) + the what-you-get line (score = semantic match, date = satellite capture) on `--color-graphite` with `--color-graphite-ink` text, mono uppercase step labels. This is audit #3's explainer absorbed into the landing design (the dashboard's `FirstRunGuide` from Task 1 keeps its in-app copy — they reinforce, not conflict).
-5. **Ft2 footer**: single inline line — wordmark · one tagline phrase · GitHub link — `border-top: var(--rule)`, `--color-ink-soft`, `--text-sm` (replaces the centered footer, audit #1).
+5. **Single-line inline footer** (design.md § Nav and footer): one **text-only** line — wordmark · one tagline phrase · small credit, **no links at all** (finding 25: a footer GitHub link would collide with the header's `aria-label="GitHub repository"` in the landmark test, and links would add a second accent target) — `border-top: var(--rule)`, `--color-ink-soft`, `--text-sm` (replaces the centered footer, audit #1).
 
 All landmarks preserved per Global Constraints; every element token-styled.
 
@@ -441,7 +552,7 @@ git commit -m "feat: landing restructure — asymmetric hero per approved macros
 ### Task 5: Dashboard design pass — tokens, states, a11y (audit majors #7, minors #11–#13/#15)
 
 **Files:**
-- Modify: `apps/web/app/dashboard/page.tsx`, `apps/web/components/ResultsPanel.tsx`, `apps/web/components/EmptyState.tsx`, `apps/web/components/BboxDraw.tsx` (styles only), `apps/web/app/globals.css` (append dashboard rules)
+- Modify: `apps/web/app/dashboard/page.tsx`, `apps/web/components/ResultsPanel.tsx`, `apps/web/components/EmptyState.tsx`, `apps/web/components/BboxDraw.tsx` (styles only), `apps/web/components/DetailPanel.tsx`, `apps/web/components/TelemetryChart.tsx` (raw-hex cleanup — Step 3d), `apps/web/app/globals.css` (append dashboard rules), `apps/web/__tests__/search_ui.test.tsx` (row assertion update — Step 3c)
 - Test: `apps/web/__tests__/dashboard-styles.test.tsx` (created)
 
 **Interfaces:**
@@ -467,16 +578,21 @@ it("selected row uses aria-current, not aria-pressed (audit #13)", () => {
   expect(screen.getByRole("button", { name: /0\.91/ })).not.toHaveAttribute("aria-pressed");
 });
 
-it("row score+date container carries tabular-nums (audit #12)", () => {
+it("row score+date container carries tabular-nums (audit #12)", async () => {
   render(<ResultsPanel results={results} onPick={() => {}} />);
   const row = screen.getByRole("button", { name: /0\.91/ });
   expect(row.className).toContain("results-row");
-  // the class is the token-migrated container; css assertion lives in the snapshot of globals.css scan below
+  // pin the CSS itself — the class is useless if the rule is missing (finding 22)
+  const fs = await import("node:fs/promises");
+  const css = await fs.readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  const rule = css.match(/\.results-row\s*\{[^}]+\}/);
+  expect(rule).not.toBeNull();
+  expect(rule![0]).toContain("font-variant-numeric: tabular-nums");
 });
 
 it("no raw palette colors remain in dashboard components (audit #7)", async () => {
   const fs = await import("node:fs/promises");
-  const files = ["app/dashboard/page.tsx", "components/ResultsPanel.tsx", "components/EmptyState.tsx", "components/BboxDraw.tsx"];
+  const files = ["app/dashboard/page.tsx", "components/ResultsPanel.tsx", "components/EmptyState.tsx", "components/BboxDraw.tsx", "components/DetailPanel.tsx", "components/TelemetryChart.tsx"];
   for (const file of files) {
     const src = await fs.readFile(new URL(`../${file}`, import.meta.url), "utf8");
     const raw = [
@@ -497,7 +613,9 @@ Expected: FAIL — `aria-pressed` still present on rows; raw hex found in `dashb
 
 - `ResultsPanel.tsx`: row → `className="results-row"` **plus `data-testid="result-row"`** (Task 10's e2e selects it — this is where that testid is added); `aria-current={selected ? "true" : undefined}` (drop `aria-pressed`); selected styling per design.md (`accent-soft` is the selected-row tint): `.results-row { font-variant-numeric: tabular-nums; font-family: var(--font-mono); } .results-row[aria-current="true"] { background: var(--color-accent-soft); color: var(--color-ink); border-color: var(--color-accent); }`; score/date values in `var(--font-mono)`; hairline borders `1px solid var(--color-rule)`, radius `var(--radius-control)`; delete the dead `results.length === 0` placeholder branch (`:23-25` — page never mounts it empty; audit noted it).
 - `dashboard/page.tsx`: replace inline `style={{…}}` with classes `.dashboard`, `.dash-row`, `.dash-alert`, `.dash-status`; error color → `var(--color-danger)` (kills `#b91c1c`).
-- `EmptyState.tsx` / `BboxDraw.tsx`: dashed borders → `1px solid var(--color-border)` (audit #11); fallback-hex vars (`var(--surface, #ffffff)`) → plain `var(--color-surface)`.
+- `EmptyState.tsx` / `BboxDraw.tsx`: dashed borders → `1px solid var(--color-rule)` (audit #11 — note: `--color-rule`, not the nonexistent `--color-border`, finding 11); fallback-hex vars (`var(--surface, #ffffff)`, `var(--ink-soft, #4a5b6a)`) → `var(--color-paper-2)` / `var(--color-ink-soft)` with **no hex fallbacks**.
+- **Step 3c:** update the row-state assertion in `search_ui.test.tsx` (~:318–320): `toHaveAttribute("aria-pressed", "true")` → `toHaveAttribute("aria-current", "true")` (Rows now use aria-current — coverage-map note for audit #13).
+- **Step 3d (finding 12):** raw-hex cleanup in the two files this task now owns: `TelemetryChart.tsx` (~:156 `#b91c1c` → `var(--color-danger)`) and `DetailPanel.tsx` (`#e1e8ee` → `var(--color-rule)`, `#ffffff` → `var(--color-paper-2)`, `var(--accent, #0b6f8f)` → `var(--color-accent)` with the hex fallback dropped). After this, the color-scan test's file list must ALSO include these two files — update the scan array in `dashboard-styles.test.tsx` to six files.
 - `globals.css` append: the `.results-row`, `.guide` (Task 1 may have added minimal styles — harmonize), `.dash-*` rules with tokens only.
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -559,12 +677,14 @@ function setup() {
   return { ref, onPreview, onRectangle, onResults, onError };
 }
 
-it("click 1 previews the degenerate box, click 2 completes it", () => {
+it("click 1 previews the degenerate box; click 2 previews the completed box, hands off to onRectangle, then clears the preview", () => {
   const { ref, onPreview, onRectangle } = setup();
   ref.current!.handleMapClick([39.0, 21.0]);
-  expect(onPreview).toHaveBeenCalledWith([[39, 21], [39, 21]]);
+  expect(onPreview).toHaveBeenLastCalledWith([[39, 21], [39, 21]]);
   ref.current!.handleMapClick([39.2, 21.2]);
-  expect(onPreview).toHaveBeenLastCalledWith([[39.0, 21.0], [39.2, 21.2]]);
+  // exact sequence at corner B (finding 8): preview(completed) → onRectangle(completed) → preview(null) → POST
+  expect(onPreview).toHaveBeenCalledWith([[39.0, 21.0], [39.2, 21.2]]);
+  expect(onPreview).toHaveBeenLastCalledWith(null);
   expect(onRectangle).toHaveBeenCalledWith([[39.0, 21.0], [39.2, 21.2]]);
 });
 
@@ -595,12 +715,12 @@ Expected: FAIL — `onPreview` prop does not exist
 
 - [ ] **Step 3: Implement**
 
-`Map.tsx`: add `setPreviewRectangle` to `MapHandle` — draws GeoJSON polygon into a `draw-preview` source/layer with `line-dasharray: [2, 2]`, `line-color: var/accent`, cleared on `null` and on `map.remove()` cleanup (share the helper shape with `setRectangle`; preview layer id distinct from the persisted `draw-rectangle` layer).
+`Map.tsx`: add `setPreviewRectangle` to `MapHandle` — draws GeoJSON polygon into a `draw-preview` source/layer with `line-dasharray: [2, 2]` and `line-color: ACCENT_HEX` where `const ACCENT_HEX = "#0b6f8f";` is a module-level shared constant (finding 17: maplibre paint properties cannot resolve CSS custom properties — the previous draft's `var/accent` was both a typo and unresolvable; this hex is the *paint-constant exemption* named in Global Constraints, and the same constant must be reused by Task 7's `draw-polygon` layer); cleared on `null` and on `map.remove()` cleanup (share the helper shape with `setRectangle`; preview layer id distinct from the persisted `draw-rectangle` layer).
 
 `BboxDraw.tsx`: add `onPreview` prop; in `handleMapClick`:
 - click 1: `onPreview([lonLat, lonLat])` alongside `setCorner`.
 - Esc / disarm: `onPreview(null)`.
-- click 2 (after normalization): `onPreview(bbox)` is already implied by completing the box — call `onRectangle(bbox)` **before** `void runSearch(bbox)` (move the existing call from `runSearch`'s success path at `:73` to `handleMapClick` after normalization), clear preview (`onPreview(null)` — the persisted rectangle takes over), then POST. On fetch error the page keeps the rectangle + shows the alert (update the `BboxDraw` docstring comment at `:36-39` accordingly).
+- click 2 — **exact sequence (finding 8):** after normalization, emit in this order: `onPreview(completedBox)` → `onRectangle(completedBox)` (moved here from `runSearch`'s success path at `:73` — the persisted layer takes over) → `onPreview(null)` (clear the dashed preview) → `void runSearch(bbox)`. On fetch error the page keeps the rectangle + shows the alert (update the `BboxDraw` docstring comment at `:36-39` accordingly).
 
 `dashboard/page.tsx`: pass `onPreview={(bbox) => mapRef.current?.setPreviewRectangle(bbox)}`.
 
@@ -626,7 +746,7 @@ git commit -m "feat: live on-map draw preview; rectangle renders before the fetc
 
 **Interfaces:**
 - Consumes: Task 6's `setPreviewRectangle` pattern; `apiFetch` (existing).
-- Produces: `BboxDraw` gains a second toggle **"Draw polygon"** (`shape: "rect" | "polygon" | null` internal; only one shape armed at a time — arming one disarms the other via one shared `onToggle` for rect and a new `onTogglePolygon` for polygon, page owns both flags). Polygon machine: each map click appends a vertex (`[lon,lat]`, cap 64); Enter key or map double-click closes (≥3 vertices required); Esc clears vertices but keeps armed; close → `POST /api/search/polygon` body `{polygon: [[lon,lat], ...], q: currentQuery || null}` → `onResults` (same merge path) + `onPolygon(polygon)` so Map can draw the finalized shape (`MapHandle.setPolygon(coords: [number,number][] | null)` — solid line layer `draw-polygon`, cleared on arm/disarm). Status strip shows `N vertices — click to add, Enter/double-click to close (Esc clears).`
+- Produces: `BboxDraw` gains a second toggle **"Draw polygon"** (`shape: "rect" | "polygon" | null` internal; only one shape armed at a time — arming one disarms the other via one shared `onToggle` for rect and a new `onTogglePolygon` for polygon, page owns both flags). Polygon machine: each map click appends a vertex (`[lon,lat]`, cap 64); Enter key or map double-click closes (≥3 vertices required); Esc clears vertices but keeps armed; close → `POST /api/search/polygon` body `{polygon: [[lon,lat], ...], q: currentQuery || null}` → `onResults` (same merge path) + `onPolygon(polygon)` so Map can draw the finalized shape (`MapHandle.setPolygon(coords: [number,number][] | null)` — solid line layer `draw-polygon`, cleared on arm/disarm). Status strip shows exactly `` `${n} ${n === 1 ? "vertex" : "vertices"} — click to add, Enter/double-click to close (Esc clears).` `` (singular/plural pinned — Task 10's e2e sentinel greps `^1 vertex —`, which is only true AFTER click 1 registers on a loaded map style; the "0 vertices" text must NOT match that pattern).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -692,9 +812,19 @@ it("Esc clears vertices without sending", () => {
   fireEvent.keyDown(window, { key: "Enter" });
   expect(onPolygon).not.toHaveBeenCalled();
 });
+
+it("double-click near the last vertex closes (no duplicate vertex appended)", () => {
+  const { ref, onPolygon } = setup();
+  ref.current!.handleMapClick([39.0, 21.0]);
+  ref.current!.handleMapClick([39.1, 21.0]);
+  ref.current!.handleMapClick([39.05, 21.1]);
+  // second rapid click ~20ms later, 1e-7° from the last vertex → close, not append
+  ref.current!.handleMapClick([39.05 + 1e-7, 21.1 + 1e-7]);
+  expect(onPolygon).toHaveBeenCalledWith([[39.0, 21.0], [39.1, 21.0], [39.05, 21.1]]);
+});
 ```
 
-**Mutual-exclusion precedence (binding):** `handleMapClick` routes to the polygon machine when `polygonMode` is true, else to the rect machine — the page guarantees both flags are never true at once (`drawShape` state), and the component must still prefer `polygonMode` if both ever arrive (defensive first-branch).
+**Branch precedence (binding):** `handleMapClick` checks `polygonMode` FIRST, then `active` — during polygon draw the page passes `active=true` AND `polygonMode=true` simultaneously (that's the real combination; the rect machine must be unreachable in that state via the `if/else if` order), and the unit test pins exactly this pair.
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -703,11 +833,19 @@ Expected: FAIL — `polygonMode` / `onTogglePolygon` / `onPolygon` props do not 
 
 - [ ] **Step 3: Implement**
 
-`BboxDraw.tsx` — new state `vertices: [number, number][]` (reset on arm/disarm/Esc/after send). New props: `polygonMode: boolean`, `onTogglePolygon: () => void`, `onPolygon: (polygon: [number, number][]) => void`. Routing: when `polygonMode` and `active`-equivalent flag is on, `handleMapClick` appends to `vertices` (cap 64 — silently ignore beyond, status strip says `64 vertex cap`) instead of the rect machine; `runPolygon(polygon)` posts `/search/polygon` via `apiFetch`, calls `onResults` + disarms via `onTogglePolygon()`. Keydown: Enter closes (≥3), Esc clears `vertices`. UI: second ghost toggle button `aria-pressed={polygonMode}` labeled `Draw polygon`, mutually exclusive with `Draw area` (arming one calls the other's off-handler via the page). Status strip mirrors the rect variant with vertex count.
+`BboxDraw.tsx` — new state `vertices: [number, number][]` (reset on arm/disarm/Esc/after send) and a `lastClickAtRef = useRef<number>(0)` for the close gesture. New props are **optional** (finding 13 — Task 6's tests render without them and `tsc` must stay green): `polygonMode?: boolean`, `onTogglePolygon?: () => void`, `onPolygon?: (polygon: [number, number][]) => void`.
 
-`Map.tsx`: `setPolygon(coords: [number,number][] | null)` on `MapHandle` — GeoJSON LineString (auto-close ring on render) in layer `draw-polygon`, solid accent line + 15% fill; cleared on null. Map double-click closes the polygon, implemented over two rapid click events: when a click arrives **within 250 ms of the previous click AND within 1e-6° of the last vertex AND `vertices.length >= 3`**, do **not** append it — treat that second click as the close gesture (same path as Enter) and send the polygon. The first click of the pair appended normally. This implements "double-click closes" without a second event type.
+Routing and gating (finding 15 — exact page wiring, mirrored here so unit tests match the real combination):
+- The page passes **`active={drawShape !== null}`** (armed in EITHER mode — this is what keeps the keydown listeners attached during polygon draw) and **`polygonMode={drawShape === "polygon"}`**. The T7 unit test already renders exactly this pair (`active polygonMode`), so unit and page agree.
+- `handleMapClick`: `if (polygonMode)` → polygon branch (append vertex, cap 64 — silently ignore beyond, status strip says `64 vertex cap`); `else if (!active)` → return; else → the rect machine (unchanged).
+- Keydown effect depends on `[active]` and branches internally: **Enter** closes polygon when `polygonMode && vertices.length >= 3` (rect mode: no-op); **Esc** clears `vertices` when `polygonMode`, else clears the rect corner (existing behavior).
+- Button pressed-states are **derived**, never new props: "Draw area" → `aria-pressed={active && !polygonMode}`; "Draw polygon" → `aria-pressed={active && polygonMode}`.
+- Close gesture — **double-click, owned by BboxDraw (finding 16 — Map cannot close or send; it only forwards clicks):** inside the polygon branch, before appending: if `vertices.length >= 3` AND `Date.now() - lastClickAtRef.current < 250` AND the new point is within `1e-6°` of the last vertex → **do not append; treat this click as close** (same path as Enter), reset `lastClickAtRef`; else append and set `lastClickAtRef.current = Date.now()`.
+- `runPolygon(polygon)` posts `/search/polygon` via `apiFetch`, calls `onPolygon?.(polygon)` + `onResults` + disarms via `onTogglePolygon?.()`. Status strip mirrors the rect variant with vertex count.
 
-`dashboard/page.tsx`: `drawShape: "rect" | "polygon" | null` state replaces the boolean (arming one clears the other + clears preview/polygon layers); wires `onPolygon` to draw the finalized shape.
+`Map.tsx`: `setPolygon(coords: [number,number][] | null)` on `MapHandle` — GeoJSON LineString (auto-close ring on render) in layer `draw-polygon`, **solid `ACCENT_HEX` line (the same module constant from Task 6) + 15% fill** (paint exemption applies — no CSS vars); cleared on null. Map only forwards clicks (the double-click close lives in BboxDraw per above).
+
+`dashboard/page.tsx`: `drawShape: "rect" | "polygon" | null` state replaces the old boolean. Wiring: `active={drawShape !== null}`, `polygonMode={drawShape === "polygon"}`, rect-toggle handler sets `drawShape` to `"rect"` or `null`, polygon-toggle handler sets `"polygon"` or `null` (arming one clears the other AND clears the preview/polygon layers), `onPolygon` draws the finalized shape. This is the exact combination the unit tests render.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -731,17 +869,40 @@ git commit -m "feat: free-polygon draw machine with vertex preview and close ges
 
 **Interfaces:**
 - Consumes: existing `verify_jwt` dependency, `get_encoder`, `_row_to_result`, `SearchResult` response model, `limiter` (60/minute pattern already on the router), `Tile.bbox` Geometry.
-- Produces: `POST /search/polygon` body `{"polygon": [[lon, lat], ...], "q": str | null, "limit": int = 12}` → `VectorSearchResponse` (same `SearchResult[]`); validation → 422 for: <3 points, >64 points, non-finite coordinate, out of ±180/±90, zero-area (collinear) ring; duplicate closing vertex (last == first) accepted and normalized (dropped before build). Server builds `POLYGON((...))` WKT → `ST_GeomFromText(…, 4326)`; filter `ST_Intersects(Tile.bbox, poly)`; with `q`: cosine-rank within filter; without: `captured_at DESC`; `limit = min(limit, 12)`.
+- Produces: `POST /search/polygon` body `{"polygon": [[lon, lat], ...], "q": str | null, "limit": int = 12}` → `VectorSearchResponse` (same `SearchResult[]`); validation → 422 for: <3 points, >64 points, non-finite coordinate, out of ±180/±90, zero-area (collinear) ring; duplicate closing vertex (last == first) accepted and normalized (dropped before build). Server builds `POLYGON((...))` WKT → `func.ST_GeomFromText(…, 4326)`; filter `func.ST_Intersects(Tile.bbox, poly)`; with `q`: cosine-rank within filter; without: `captured_at DESC`; **`limit` is validated by the model (`Field(default=12, ge=1, le=12)` → out-of-range is 422; there is NO separate clamp — one mechanism, finding 28)**.
 
 - [ ] **Step 1: Write the failing tests**
 
 ```python
 # apps/api/tests/test_search_polygon.py
 import pytest
+import sqlalchemy as sa
 
+from app.models import Tile
 from tests.helpers import login   # repo convention: a FUNCTION, not a fixture
 
 pytestmark = pytest.mark.db
+
+
+@pytest.fixture()
+def isolate_tiles(engine_session):
+    """Wipe `tiles` before and after every test in this file.
+
+    conftest's `seeded_tiles` APPENDS 50 rows per call (no wipe), so repeated
+    seeded tests would accumulate duplicates: exact-count/set assertions here
+    would break, and leftover coral rows (identical embedding = distance ties)
+    would make test_search_vector's rank-1 assertion ambiguous — that file
+    sorts alphabetically after this one. Verbatim copy of the fixture in
+    test_search_bbox.py:28-43 (finding 10). Autouse resolves before
+    explicitly requested same-scope fixtures, so the wipe precedes
+    `seeded_tiles`.
+    """
+    engine_session.execute(sa.delete(Tile))
+    engine_session.commit()
+    yield
+    engine_session.execute(sa.delete(Tile))
+    engine_session.commit()
+
 
 def _polygon(n_extra=0):
     # non-degenerate triangle + optional extras (CCW, non-collinear)
@@ -767,7 +928,7 @@ def test_too_many_points_422(create_client):
     pts = [[39.0 + i * 0.001, 21.0 + (i % 2) * 0.001] for i in range(65)]
     assert create_client.post("/search/polygon", json={"polygon": pts}).status_code == 422
 
-def test_closed_ring_normalized_and_returns_only_intersects(create_client, seeded_tiles):
+def test_closed_ring_normalized_and_returns_only_intersects(create_client, isolate_tiles, seeded_tiles):
     login(create_client)
     ring = _polygon() + [_polygon()[0]]  # duplicate closing vertex
     r = create_client.post("/search/polygon", json={"polygon": ring})
@@ -776,7 +937,7 @@ def test_closed_ring_normalized_and_returns_only_intersects(create_client, seede
     # seeded tiles span 35.0–35.5E / 20.0–20.01N; this triangle (39E/21N) intersects none
     assert ids == set()
 
-def test_polygon_with_q_ranks_within_filter(create_client, seeded_tiles):
+def test_polygon_with_q_ranks_within_filter(create_client, isolate_tiles, seeded_tiles):
     login(create_client)
     # a box-shaped ring around the seeded band, with the coral query
     ring = [[35.0, 19.99], [35.6, 19.99], [35.6, 20.02], [35.0, 20.02]]
@@ -799,7 +960,7 @@ def test_non_point_entries_422(create_client):
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd apps/api && ../.venv/bin/pytest tests/test_search_polygon.py -v`
+Run: `cd apps/api && ../../.venv/bin/pytest tests/test_search_polygon.py -v`
 Expected: FAIL — 404 route not found
 
 - [ ] **Step 3: Implement**
@@ -857,7 +1018,7 @@ def search_polygon(
 ) -> VectorSearchResponse:
     ring = _validate_polygon(payload.polygon)
     wkt = "POLYGON((" + ", ".join(f"{lon} {lat}" for lon, lat in ring) + f", {ring[0][0]} {ring[0][1]}))"  # closed
-    poly = ST_GeomFromText(wkt, 4326)
+    poly = func.ST_GeomFromText(wkt, 4326)   # func pattern — search.py has NO direct geoalchemy2 symbol imports (finding 19)
     stmt = select(...).where(ST_Intersects(Tile.bbox, poly))  # same row-mapping as /search/vector
     if payload.q:
         vec = get_encoder(settings).encode_text(payload.q)
@@ -868,12 +1029,12 @@ def search_polygon(
     # map rows with the shared _row_to_result — identical to /search/bbox no-q mode (score 0.0)
 ```
 
-*(Exact select/mapping lines mirror the `/search/bbox` implementation directly above it in the same file — copy its column list and `_row_to_result` usage; import `ST_GeomFromText` from `geoalchemy2` alongside the existing `ST_Intersects`/`ST_MakeEnvelope` imports, and `math` at module top.)*
+*(Exact select/mapping lines mirror the `/search/bbox` implementation directly above it in the same file — copy its column list and `_row_to_result` usage. Imports actually needed: add `math` at module top and extend the existing `from fastapi import …` line with `HTTPException` (it is NOT currently imported — finding 19). All PostGIS calls use the file's existing `func.*` pattern (`func.ST_GeomFromText` joins the existing `func.ST_Intersects`/`func.ST_MakeEnvelope` usage) — no geoalchemy2 symbol imports.)*
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd apps/api && ../.venv/bin/pytest tests/test_search_polygon.py tests/test_auth.py -v`
-Expected: PASS — including authz sweep (add `"/search/polygon"` to the sweep's POST path list in `test_auth.py` and assert 401)
+Run: `cd apps/api && ../../.venv/bin/pytest tests/test_search_polygon.py tests/test_auth.py -v`
+Expected: PASS — including authz sweep: add `"/search/polygon"` in **BOTH** places in `test_auth.py` (the `routes` list around :61 **and** the `is_post` tuple around :68 — only one of them → 405/no-dispatch ≠ 401 fails the sweep; finding 20) and assert 401
 
 - [ ] **Step 5: Commit**
 
@@ -892,7 +1053,7 @@ git commit -m "feat: POST /search/polygon — validated ring → ST_Intersects s
 
 **Interfaces:**
 - Consumes: `SearchResult[]`, existing `selectedId` state, `MapHandle`, `DetailPanel {tile, results, onClose}`.
-- Produces: page state `hoveredId: string | null`; `ResultsPanelProps` gains `onHover: (id: string | null) => void` (fires on row mouseenter/focus → id, mouseleave/blur → null); `Map` gains `hoveredId?: string | null` prop (marker color/size ramp shifts for the hovered feature — no per-result listeners, single paint derived from props); `View3D` gains `hoveredId?: string | null` (highlighted point scaled ×1.4 + accent color); `DetailPanelProps` gains `onNavigate: (delta: 1 | -1) => void` → prev/next buttons + `ArrowLeft`/`ArrowRight` key handlers; `MapHandle.setPopupContent` replaced: single `maplibregl.Popup` instance in a ref, closed before reopen, content built with `document.createElement` + `textContent` (no `setHTML`).
+- Produces: page state `hoveredId: string | null`; `ResultsPanelProps` gains **`onHover?: (id: string | null) => void`** (OPTIONAL — finding 13: Task 5's tests render ResultsPanel without it and `tsc` must stay green; fires on row mouseenter/focus → id, mouseleave/blur → null); `Map` gains `hoveredId?: string | null` prop (marker color/size ramp shifts for the hovered feature — no per-result listeners, single paint derived from props); `View3D` gains `hoveredId?: string | null` (highlighted point scaled ×1.4 + accent color); `DetailPanelProps` gains **`onNavigate?: (delta: 1 | -1) => void`** (OPTIONAL — finding 13: existing `detail_panel.test.tsx` renders without it) → prev/next buttons + `ArrowLeft`/`ArrowRight` key handlers; `MapHandle.setPopupContent` replaced: single `maplibregl.Popup` instance in a ref, closed before reopen, content built with `document.createElement` + `textContent` (no `setHTML`).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -939,7 +1100,11 @@ it("arrow keys navigate when the panel is focused", () => {
 });
 ```
 
-Map popup test (in the same file, maplibre mocked as in `search_ui.test.tsx`): after clicking a marker twice, assert the mock Popup constructor was instantiated **once per open with the previous one `.remove()`d** — pin via a call-count on `remove` (the mock exposes instances).
+Map popup tests (in the same file, maplibre mocked as in `search_ui.test.tsx`):
+
+- **Step 1a — extend the mock first (finding 23):** the hoisted `MockPopup` class currently has only `setLngLat`/`setHTML`/`addTo`, and **the class is copy-pasted in multiple test files** — add `setDOMContent = vi.fn((): any => this);` and `remove = vi.fn();` to **every** copy (grep the repo: `grep -rln "class MockPopup" apps/web/__tests__`). Without this, the second marker click throws `ref.current.remove is not a function`.
+- **Step 1b — single-instance lifecycle:** after clicking a marker twice, assert the previous popup instance's `remove` was called and the new content went through `setDOMContent` (**not** `setHTML`) — pin via instance call-counts from the mock's `popups` array.
+- **Step 1c — unmount cleanup (finding 24, pins Review Focus 4):** open a popup (marker click), `unmount()` the map, assert the last popup instance's `remove` was called and `map.remove` was called (the existing unmount helpers in `search_ui.test.tsx` show the pattern).
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -948,7 +1113,7 @@ Expected: FAIL — `onHover` / `onNavigate` props do not exist
 
 - [ ] **Step 3: Implement**
 
-- `dashboard/page.tsx`: add `hoveredId` state; pass `onHover={setHoveredId}` to ResultsPanel, `hoveredId` to MapView and View3D; `handlePrevNext(delta)` computes next index modulo `results.length` and sets `selectedId` (no-op when `results.length < 2` or nothing selected — but allow opening detail on first result if none selected: if `selectedId === null && results.length > 0 && delta === 1` → select index 0).
+- `dashboard/page.tsx`: add `hoveredId` state; pass `onHover={setHoveredId}` to ResultsPanel, `hoveredId` to MapView and View3D; `handlePrevNext(delta)` computes next index modulo `results.length` and sets `selectedId`, returning early when `results.length < 2` **or `selectedId === null`** (finding 21: the ArrowLeft/Right listener lives inside DetailPanel, which only mounts when something is selected — a "select index 0 by keyboard from nothing" branch would be unreachable dead code; first selection happens by click).
 - `ResultsPanel.tsx`: rows get `onMouseEnter/onMouseLeave/onFocus/onBlur` → `onHover(id|null)`; keep `aria-current` selection from Task 5.
 - `Map.tsx`: derive marker paint from `hoveredId` (hovered feature → accent color + larger radius in the existing `circle-color`/`circle-radius` expressions; no listeners added).
 - `View3D.tsx`: hovered point → `scale ×1.4` + accent color (single re-render from props; reuse the existing rebuild effect).
@@ -1010,10 +1175,17 @@ test("polygon draw searches an area", async ({ page }) => {
   await login(page);
   await page.getByRole("button", { name: "Draw polygon" }).click();
   await page.locator(".maplibregl-canvas").waitFor({ state: "visible" });
-  await page.waitForTimeout(600); // style load — mirrors the bbox steps' wait (Review Focus #5)
   const canvas = page.locator(".maplibregl-canvas");
   const box = (await canvas.boundingBox())!;
-  for (const [fx, fy] of [[0.45, 0.40], [0.60, 0.40], [0.55, 0.55]]) {
+  // Sentinel instead of a blind timeout (finding 14 / Review Focus #5): click 1,
+  // then WAIT for the status strip to report the first vertex — that text can only
+  // appear if the click registered on a loaded style, so a slow cold stack fails
+  // loudly here instead of silently no-op'ing every vertex.
+  await canvas.click({ position: { x: box.width * 0.45, y: box.height * 0.40 } });
+  // exact pattern: only the POST-click-1 status ("1 vertex — …") matches; the
+  // pre-click "0 vertices" text does not (Task 7 pins the format)
+  await expect(page.getByRole("status").filter({ hasText: /^1 vertex —/ }).first()).toBeVisible({ timeout: 15_000 });
+  for (const [fx, fy] of [[0.60, 0.40], [0.55, 0.55]]) {
     await canvas.click({ position: { x: box.width * fx, y: box.height * fy } });
   }
   const req = page.waitForResponse((r) => r.url().includes("/api/search/polygon"));
@@ -1027,7 +1199,7 @@ test("polygon draw searches an area", async ({ page }) => {
 
 - [ ] **Step 2: Run the full local gates**
 
-Run: `cd apps/api && ../.venv/bin/pytest -q -m "not ml"` ; `cd etl && ../.venv/bin/pytest -q -m "not smoke"` ; `cd apps/web && npm test && npx tsc --noEmit && npm run build` ; repo root: `.venv/bin/ruff check .`
+Run: `cd apps/api && ../../.venv/bin/pytest -q -m "not ml"` ; `cd etl && ../.venv/bin/pytest -q -m "not smoke"` ; `cd apps/web && npm test && npx tsc --noEmit && npm run build` ; repo root: `.venv/bin/ruff check .`
 Expected: all PASS
 
 - [ ] **Step 3: Run e2e against a rebuilt stack**
@@ -1066,7 +1238,7 @@ Verify: `curl -sI https://geo.sumbono.dev/` (headers intact), landing 200 with n
 ## Self-Review (executed by plan author)
 
 1. **Spec coverage:** audit #3 → Task 1; #4 → Task 2; #1/#2 → Tasks 3–4 (preview gate + build); #8/#9/#10 + #14 → Task 3; #7/#11/#12/#13/#15 → Task 5; #5 → Tasks 6 (feedback) + 7 (polygon FE) + 8 (polygon API); #6 → Task 9; e2e/ship → Task 10. All 15 findings mapped; the 5 user issues = audit 3,4,5(→6,7,8),6(→9). **No gaps.**
-2. **Placeholder scan:** Task 8's parametrize row flagged and replaced inline with a concrete `bad_shape` test; font names deferred to the preview gate by design (controller gate, documented); no TBD/TODO/"similar to Task N".
+2. **Placeholder scan:** Task 8's parametrize row flagged and replaced inline with a concrete `bad_shape` test; font names are concrete (Space_Grotesk/Inter/JetBrains_Mono — the preview gate resolved into `design.md` before execution); no TBD/TODO/"similar to Task N".
 3. **Type consistency:** `onSuggest(query: string)` identical in Tasks 1/2 (page's `handleSuggest`); `SearchResult` untouched; `MapHandle` grows `setPreviewRectangle` (T6) then `setPolygon` (T7) — both additive; `BboxDrawHandle.handleMapClick` unchanged signature across T6/T7; `onHover`/`onNavigate` defined only in Task 9 and consumed there.
 4. **Review Focus:** all five lines have owning tests — polygon validation matrix (T8 Step 1), guide visibility lifecycle (T1 Step 1 page tests), landmark preservation (T4 Step 1 + full Playwright T10), hover/popup cleanup (T9 Step 1 + existing unmount tests), polygon e2e race (T10 Step 1 wait + T7 deterministic unit tests).
 
@@ -1075,3 +1247,5 @@ Verify: `curl -sI https://geo.sumbono.dev/` (headers intact), landing 200 with n
 **Harness-adversarial pass (2026-10-08) applied:** fixed 4 more — user-event imports → `fireEvent` (package never installed), `login` fixture → explicit `login(client)` calls, `result-row` testid ownership pinned to T5, fetch mocking → `vi.stubGlobal` harness; plus rect/polygon precedence clause.
 
 **Design gate resolved (2026-10-08):** user confirmed the multi-page design system; `design.md` written at repo root (modern-minimal · Cobalt-teal · Workbench families · Space Grotesk/Inter/JetBrains Mono · bordered nav · Ft2 footer · ⌘K deferred). Tasks 3–5 rewritten to consume it directly — no open decisions remain in this plan.
+
+**Independent adversarial review (2026-10-08, fresh-context subagent) applied:** 10 criticals + 7 majors + 11 minors found and fixed — broken `../.venv` pytest path (→`../../.venv`), six test files missing vitest core imports, Task 1 page tests without the maplibre/fetch mock boilerplate, impossible `result-row` await at T1, RTL `getByText` scope bug, T1/T2 breaking five pre-existing assertions (scoped via `within` + Step 3b), T6 preview-order contradiction, orphaned `redesign-decisions.md` references, missing `isolate_tiles` in the polygon test file, wrong token names in T5, end-of-plan (not post-T3) color constraint + DetailPanel/TelemetryChart added to T5's file set, optional cross-task props (`polygonMode?`/`onHover?`/`onNavigate?`) for tsc across task boundaries, exact page wiring for `active`/`polygonMode`, double-click close moved into BboxDraw + unit test, maplibre paint hex constant (CSS vars don't resolve), shadow rename map entry, `func.ST_GeomFromText` + HTTPException imports, sweep in BOTH lists, limit-validation single mechanism, footer without links + single solid button, `next/font` network note, vertex-status e2e sentinel with pinned format, and the tabular-nums test now asserting the CSS itself.

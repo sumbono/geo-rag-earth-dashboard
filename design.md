@@ -95,6 +95,22 @@ dark graphite band per marketing page, `--space-3xl` between major bands.
 - **Secondary:** typographic or hairline-outline in ink — never a second solid
 - No pills on buttons (pills belong to Coral); no gradients, ever
 
+## Nav and footer
+
+- **Nav (marketing pages): Cobalt bordered nav** — flush full-width bar,
+  `border-bottom: var(--rule)`, light blur on scroll. Wordmark left
+  (`--font-display` 600); right side: GitHub link + **Log in** as a
+  **hairline/ghost button** (never a second solid fill — accent discipline:
+  exactly ONE solid accent button per viewport, the hero's primary CTA).
+  No floating pill (Coral vocabulary), no ⌘K (known omission, below).
+- **App pages (dashboard):** no marketing nav — the tab strip + toolbar ARE
+  the chrome, styled from the same tokens.
+- **Footer: single-line inline footer (Ft2 voice)** — one text-only line:
+  wordmark · one tagline phrase · small credit. **No links** (avoids
+  accessible-name collisions with the header's GitHub link and keeps the
+  accent to one button). `border-top: var(--rule)`, `--color-ink-soft`,
+  `--text-sm`.
+
 ## Known omissions (deliberate)
 
 - **⌘K command palette — deferred.** Canonical Cobalt ships a working palette
