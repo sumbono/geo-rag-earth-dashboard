@@ -36,10 +36,20 @@ const ESRI_SOURCE = "esri";
 const OSM_SOURCE = "osm";
 const RESULTS_SOURCE = "results";
 const RECTANGLE_SOURCE = "rectangle";
+const PREVIEW_SOURCE = "preview";
 const OSM_LAYER = "osm-streets";
 const MARKERS_LAYER = "result-markers";
 const RECTANGLE_FILL_LAYER = "draw-rectangle";
 const RECTANGLE_LINE_LAYER = "draw-rectangle-outline";
+const PREVIEW_LINE_LAYER = "draw-preview";
+
+/**
+ * Brand accent as a paint literal (finding 17): maplibre paint properties
+ * cannot resolve CSS custom properties, so the dashed draw-preview layer
+ * takes this named constant instead of a scattered magic literal. Mirrors
+ * `--color-accent` in `tokens.css`; Task 7's `draw-polygon` layer reuses it.
+ */
+const ACCENT_HEX = "#0b6f8f";
 
 const EMPTY_FC: FeatureCollection = {
   type: "FeatureCollection",
@@ -48,7 +58,8 @@ const EMPTY_FC: FeatureCollection = {
 
 /** ESRI World Imagery basemap + OSM streets overlay (hidden until toggled)
  *  + an empty GeoJSON source for the score-colored result markers
- *  + an empty GeoJSON source for the drawn search rectangle (Task 19). */
+ *  + an empty GeoJSON source for the drawn search rectangle (Task 19)
+ *  + an empty GeoJSON source for the dashed in-progress preview (Task 6). */
 const style: StyleSpecification = {
   version: 8,
   sources: {
@@ -74,6 +85,10 @@ const style: StyleSpecification = {
       type: "geojson",
       data: EMPTY_FC,
     },
+    [PREVIEW_SOURCE]: {
+      type: "geojson",
+      data: EMPTY_FC,
+    },
   },
   layers: [
     { id: "esri-imagery", type: "raster", source: ESRI_SOURCE },
@@ -94,6 +109,18 @@ const style: StyleSpecification = {
       type: "line",
       source: RECTANGLE_SOURCE,
       paint: { "line-color": "#2563eb", "line-width": 2 },
+    },
+    {
+      // Dashed live preview of the in-progress box (Task 6) — sits above the
+      // persisted rectangle so the hand-off flicker reads as intentional.
+      id: PREVIEW_LINE_LAYER,
+      type: "line",
+      source: PREVIEW_SOURCE,
+      paint: {
+        "line-color": ACCENT_HEX,
+        "line-width": 2,
+        "line-dasharray": [2, 2],
+      },
     },
     {
       id: MARKERS_LAYER,
@@ -176,10 +203,15 @@ function toRectangleCollection(bbox: Bbox): FeatureCollection {
   };
 }
 
-/** Imperative map handles (Task 19): render/clear the drawn search rectangle. */
+/** Imperative map handles (Task 19): render/clear the drawn search rectangle;
+ *  Task 6 adds the dashed, non-persisted in-progress preview. */
 export interface MapHandle {
   /** Draw the given box, or pass `null` to clear it (empty GeoJSON data). */
   setRectangle: (bbox: Bbox | null) => void;
+  /** Draw (or clear with `null`) the dashed `draw-preview` layer — the live
+   *  box between corner A and the hand-off at corner B. Distinct from the
+   *  persisted `draw-rectangle` layer; both die with `map.remove()`. */
+  setPreviewRectangle: (bbox: Bbox | null) => void;
 }
 
 export interface MapProps {
@@ -204,7 +236,9 @@ export interface MapProps {
  * Task 19: a plain map `click` listener forwards `[lon, lat]` to the latest
  * `onMapClick` (the page only supplies one while draw mode is armed), and the
  * ref handle `setRectangle(bbox | null)` renders or clears the search box on
- * the dedicated GeoJSON source. All listeners die with `map.remove()`.
+ * the dedicated GeoJSON source. Task 6 adds `setPreviewRectangle(bbox | null)`
+ * driving the dashed `draw-preview` layer. All listeners die with
+ * `map.remove()` (which takes the style — sources and layers — with it).
  */
 export default function Map({ results, onPick, onMapClick, ref }: MapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -214,25 +248,37 @@ export default function Map({ results, onPick, onMapClick, ref }: MapProps) {
   onPickRef.current = onPick;
   const onMapClickRef = useRef(onMapClick);
   onMapClickRef.current = onMapClick;
-  // Latest requested rectangle, so a deferred `load` apply uses current data.
+  // Latest requested boxes, so a deferred `load` apply uses current data.
   const rectangleRef = useRef<Bbox | null>(null);
+  const previewRectangleRef = useRef<Bbox | null>(null);
   const [osmVisible, setOsmVisible] = useState(false);
+
+  // Shared shape for both draw layers: record the latest box, then push it
+  // into the GeoJSON source — immediately once the style has loaded, else on
+  // the next `load` (reading the ref then, so late applies see fresh data).
+  function applyBox(
+    sourceId: string,
+    boxRef: { current: Bbox | null },
+  ): void {
+    const map = mapRef.current;
+    if (!map) return;
+    const apply = () => {
+      const current = boxRef.current;
+      const source = map.getSource(sourceId) as GeoJSONSource | undefined;
+      source?.setData(current ? toRectangleCollection(current) : EMPTY_FC);
+    };
+    if (map.getSource(sourceId)) apply();
+    else map.once("load", apply);
+  }
 
   useImperativeHandle(ref, () => ({
     setRectangle(bbox: Bbox | null) {
       rectangleRef.current = bbox;
-      const map = mapRef.current;
-      if (!map) return;
-      const apply = () => {
-        const current = rectangleRef.current;
-        const source = map.getSource(RECTANGLE_SOURCE) as
-          | GeoJSONSource
-          | undefined;
-        source?.setData(current ? toRectangleCollection(current) : EMPTY_FC);
-      };
-      // The source exists once the style has loaded; before that, defer.
-      if (map.getSource(RECTANGLE_SOURCE)) apply();
-      else map.once("load", apply);
+      applyBox(RECTANGLE_SOURCE, rectangleRef);
+    },
+    setPreviewRectangle(bbox: Bbox | null) {
+      previewRectangleRef.current = bbox;
+      applyBox(PREVIEW_SOURCE, previewRectangleRef);
     },
   }), []);
 

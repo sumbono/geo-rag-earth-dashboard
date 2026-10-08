@@ -150,6 +150,7 @@ export default function DashboardPage() {
         currentQuery={currentQuery}
         onResults={handleBboxResults}
         onRectangle={(bbox) => mapRef.current?.setRectangle(bbox)}
+        onPreview={(bbox) => mapRef.current?.setPreviewRectangle(bbox)}
         onError={handleError}
       />
       <div className="dash-row" role="group" aria-label="View">

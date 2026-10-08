@@ -401,9 +401,19 @@ describe("bbox draw search", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "bbox search failed",
     );
-    // No rectangle for a failed search, and the toggle disarmed.
+    // Visual-first (Task 6, finding 8): the rectangle is handed to the map
+    // at corner B BEFORE the request leaves, so on failure the drawn box
+    // STAYS — the user sees what they drew and the alert explains the error.
+    // (Pre-Task-6 this asserted no rectangle; the disarm + single-error
+    // intent of the test is unchanged.)
     const map = hoisted.mapInstances[0];
-    expect(map.rectangleData.mock.calls.at(-1)[0].features).toEqual([]);
+    expect(map.rectangleData.mock.calls.at(-1)[0].features[0].geometry.coordinates[0]).toEqual([
+      [38, 21],
+      [40, 21],
+      [40, 23],
+      [38, 23],
+      [38, 21],
+    ]);
     expect(
       screen.getByRole("button", { name: "Draw area" }),
     ).toHaveAttribute("aria-pressed", "false");

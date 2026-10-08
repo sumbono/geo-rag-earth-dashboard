@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useImperativeHandle, useState, type Ref } from "react";
+import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { apiFetch } from "../lib/api";
 import type { Bbox, SearchResult } from "../lib/types";
 
@@ -20,23 +20,29 @@ export interface BboxDrawProps {
   onResults: (results: SearchResult[]) => void;
   /** Hands the completed box to the page so it can draw the rectangle. */
   onRectangle: (bbox: Bbox) => void;
+  /** Live preview of the in-progress box (degenerate at corner A, full at
+   *  corner B) — `null` clears the dashed preview layer (Task 6). */
+  onPreview: (bbox: Bbox | null) => void;
   /** Anything `apiFetch` throws — surfaced by the page as its alert. */
   onError: (error: unknown) => void;
   ref?: Ref<BboxDrawHandle>;
 }
 
 /**
- * Two-click bbox draw search (Task 19).
+ * Two-click bbox draw search (Task 19; live draw feedback, Task 6).
  *
  * The "Draw area" toggle arms the mode; the page forwards map clicks here
  * while it is armed. Click 1 records corner A (temp point/line + coordinates
- * in the status strip), click 2 normalizes the pair into an ordered
- * `[[w,s],[e,n]]`, immediately POSTs it once to `/api/search/bbox` with
- * `q: currentQuery || null`, then lifts the hits and the box to the page —
- * which merges them into the panel and renders the rectangle. Esc aborts the
- * in-progress rectangle without any request (the tool stays armed); toggling
- * the button off mid-draw also drops corner A. The toggle disarms itself
- * once a draw completes.
+ * in the status strip) and previews the degenerate box on the map. Click 2
+ * normalizes the pair into an ordered `[[w,s],[e,n]]`, then — visual-first
+ * (finding 8) — flashes the completed box on the preview layer, hands it to
+ * `onRectangle` so the persisted rectangle is on the map immediately,
+ * clears the preview, and only then POSTs once to `/api/search/bbox` with
+ * `q: currentQuery || null`, lifting the hits into the panel. On fetch error
+ * the rectangle stays (the user sees what they drew) and the page's alert
+ * explains the failure. Esc aborts the in-progress rectangle without any
+ * request (the tool stays armed); toggling the button off mid-draw also
+ * drops corner A. The toggle disarms itself once a draw completes.
  */
 export default function BboxDraw({
   active,
@@ -44,20 +50,33 @@ export default function BboxDraw({
   currentQuery,
   onResults,
   onRectangle,
+  onPreview,
   onError,
   ref,
 }: BboxDrawProps) {
-  const [corner, setCorner] = useState<[number, number] | null>(null);
+  const [corner, setCornerState] = useState<[number, number] | null>(null);
+  // State drives the status strip; the ref mirrors it so `handleMapClick`
+  // sees corner A even when two clicks land before React flushes a re-render
+  // (the imperative handle would otherwise close over a stale `corner`).
+  const cornerRef = useRef<[number, number] | null>(null);
+  function setCorner(next: [number, number] | null) {
+    cornerRef.current = next;
+    setCornerState(next);
+  }
 
-  // Esc cancels the in-progress rectangle: temp visual cleared, no request.
+  // Esc cancels the in-progress rectangle: temp visual + map preview cleared,
+  // no request. `onPreview` is an inline page callback, hence the dep.
   useEffect(() => {
     if (!active) return;
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setCorner(null);
+      if (event.key === "Escape") {
+        setCorner(null);
+        onPreview(null);
+      }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [active]);
+  }, [active, onPreview]);
 
   async function runSearch(bbox: Bbox) {
     try {
@@ -70,7 +89,9 @@ export default function BboxDraw({
         },
       );
       onResults(data.results);
-      onRectangle(bbox);
+      // The rectangle is NOT emitted here: visual-first (finding 8) hands it
+      // to the map at corner B, before the request leaves, so a failed
+      // search keeps the drawn box on screen and only raises the alert.
     } catch (error) {
       onError(error);
     }
@@ -78,28 +99,36 @@ export default function BboxDraw({
 
   function handleMapClick(lonLat: [number, number]) {
     if (!active) return;
-    if (corner === null) {
+    const cornerA = cornerRef.current; // fresh even before a re-render flushes
+    if (cornerA === null) {
       setCorner(lonLat);
+      onPreview([lonLat, lonLat]); // degenerate box — preview from click 1
       return;
     }
     // Corner B: normalize so the box is always [[w,s],[e,n]] (w<e, s<n).
     const bbox: Bbox = [
-      [Math.min(corner[0], lonLat[0]), Math.min(corner[1], lonLat[1])],
-      [Math.max(corner[0], lonLat[0]), Math.max(corner[1], lonLat[1])],
+      [Math.min(cornerA[0], lonLat[0]), Math.min(cornerA[1], lonLat[1])],
+      [Math.max(cornerA[0], lonLat[0]), Math.max(cornerA[1], lonLat[1])],
     ];
     setCorner(null);
     onToggle(); // one draw per arm — disarm before the request leaves
+    // Exact corner-B sequence (finding 8): preview(completed) → persisted
+    // rectangle takes over → preview cleared → POST.
+    onPreview(bbox);
+    onRectangle(bbox);
+    onPreview(null);
     void runSearch(bbox);
   }
 
   useImperativeHandle(
     ref,
     () => ({ handleMapClick }),
-    [active, corner, currentQuery, onResults, onRectangle, onError, onToggle],
+    [active, currentQuery, onResults, onRectangle, onPreview, onError, onToggle],
   );
 
   function handleToggleClick() {
     setCorner(null); // a fresh session never inherits a stale corner A
+    onPreview(null); // …nor a stale dashed preview
     onToggle();
   }
 
