@@ -60,6 +60,13 @@ function unionByIdMax(
  * merge — BboxDraw runs the two-click machine and POSTs; its hits are unioned
  * into `results` by id with max score winning.
  *
+ * Task 7: draw mode became `drawShape: "rect" | "polygon" | null` — the page
+ * owns both flags and BboxDraw derives its pressed-states from the exact
+ * pair `active={drawShape !== null}` / `polygonMode={drawShape === "polygon"}`
+ * (armed in either mode keeps the keydown listeners attached). Arming one
+ * tool disarms the other and clears the preview/polygon layers; polygon
+ * hits merge through the same `handleBboxResults` union path.
+ *
  * Task 20: a Map | 3D | Telemetry tab bar (aria-pressed toggles) swaps the
  * main viewport — the map grid, the client-only Three.js `<View3D>` of the
  * same results, or the Task 21 `<TelemetryChart>` (D3 line chart of one
@@ -73,7 +80,9 @@ export default function DashboardPage() {
   const [searched, setSearched] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [drawMode, setDrawMode] = useState(false);
+  // Which draw tool is armed — page-owned, mutually exclusive (Task 7):
+  // null (off) | "rect" ("Draw area") | "polygon" ("Draw polygon").
+  const [drawShape, setDrawShape] = useState<"rect" | "polygon" | null>(null);
   const [currentQuery, setCurrentQuery] = useState("");
   const [tab, setTab] = useState<Tab>("map");
   const mapRef = useRef<MapHandle | null>(null);
@@ -110,11 +119,30 @@ export default function DashboardPage() {
     setResults((prev) => unionByIdMax(prev, incoming));
   }
 
-  /** Arming draw mode starts a fresh canvas: drop the previous box. */
-  function handleToggleDraw() {
-    const next = !drawMode;
-    setDrawMode(next);
-    if (next) mapRef.current?.setRectangle(null);
+  /** Rect toggle — the "Draw area" button AND the rect machine's own
+   *  close-time `onToggle`. Arms rect (dropping the previous box — the
+   *  pre-existing fresh-canvas behavior) or disarms; either way the preview
+   *  + polygon layers are cleared (arming one tool clears the other's
+   *  geometry). The completed rectangle survives its close-time disarm
+   *  because BboxDraw re-emits onPreview/onRectangle AFTER this returns. */
+  function handleToggleRect() {
+    const next = drawShape === "rect" ? null : "rect";
+    setDrawShape(next);
+    mapRef.current?.setPreviewRectangle(null);
+    mapRef.current?.setPolygon(null);
+    if (next === "rect") mapRef.current?.setRectangle(null);
+  }
+
+  /** Polygon toggle: arms polygon (fresh vertices in BboxDraw) or disarms.
+   *  Clears the preview + polygon layers either way; the completed polygon
+   *  survives its own close-time disarm because runPolygon disarms BEFORE
+   *  calling onPolygon (disarm → handoff → request, mirroring the rect
+   *  machine), so this clear always runs before the shape is drawn. */
+  function handleTogglePolygon() {
+    const next = drawShape === "polygon" ? null : "polygon";
+    setDrawShape(next);
+    mapRef.current?.setPreviewRectangle(null);
+    mapRef.current?.setPolygon(null);
   }
 
   /** EmptyState suggestion → same single POST as a manual search. */
@@ -145,12 +173,15 @@ export default function DashboardPage() {
       />
       <BboxDraw
         ref={bboxDrawRef}
-        active={drawMode}
-        onToggle={handleToggleDraw}
+        active={drawShape !== null}
+        polygonMode={drawShape === "polygon"}
+        onToggle={handleToggleRect}
+        onTogglePolygon={handleTogglePolygon}
         currentQuery={currentQuery}
         onResults={handleBboxResults}
         onRectangle={(bbox) => mapRef.current?.setRectangle(bbox)}
         onPreview={(bbox) => mapRef.current?.setPreviewRectangle(bbox)}
+        onPolygon={(polygon) => mapRef.current?.setPolygon(polygon)}
         onError={handleError}
       />
       <div className="dash-row" role="group" aria-label="View">
@@ -185,7 +216,7 @@ export default function DashboardPage() {
             results={results}
             onPick={setSelectedId}
             onMapClick={
-              drawMode
+              drawShape !== null
                 ? (lonLat) => bboxDrawRef.current?.handleMapClick(lonLat)
                 : undefined
             }

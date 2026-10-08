@@ -37,12 +37,15 @@ const OSM_SOURCE = "osm";
 const RESULTS_SOURCE = "results";
 const RECTANGLE_SOURCE = "rectangle";
 const PREVIEW_SOURCE = "preview";
+const POLYGON_SOURCE = "polygon";
 const OSM_LAYER = "osm-streets";
 const MARKERS_LAYER = "result-markers";
 const RECTANGLE_FILL_LAYER = "draw-rectangle";
 const RECTANGLE_LINE_LAYER = "draw-rectangle-outline";
 const PREVIEW_LINE_LAYER = "draw-preview";
 const PREVIEW_DOT_LAYER = "draw-preview-dot";
+const POLYGON_FILL_LAYER = "draw-polygon-fill";
+const POLYGON_LINE_LAYER = "draw-polygon";
 
 /**
  * Brand accent as a paint literal (finding 17): maplibre paint properties
@@ -61,7 +64,8 @@ const EMPTY_FC: FeatureCollection = {
  *  + an empty GeoJSON source for the score-colored result markers
  *  + an empty GeoJSON source for the drawn search rectangle (Task 19)
  *  + an empty GeoJSON source for the live draw preview — corner-A dot and
- *    dashed box (Task 6, R-6a). */
+ *    dashed box (Task 6, R-6a)
+ *  + an empty GeoJSON source for the finalized free polygon (Task 7). */
 const style: StyleSpecification = {
   version: 8,
   sources: {
@@ -88,6 +92,10 @@ const style: StyleSpecification = {
       data: EMPTY_FC,
     },
     [PREVIEW_SOURCE]: {
+      type: "geojson",
+      data: EMPTY_FC,
+    },
+    [POLYGON_SOURCE]: {
       type: "geojson",
       data: EMPTY_FC,
     },
@@ -141,6 +149,26 @@ const style: StyleSpecification = {
         "circle-color": ACCENT_HEX,
         "circle-opacity": 0.9,
       },
+    },
+    {
+      // Task 7 finalized free polygon: 15% accent wash under the stroke.
+      // NO geometry-type filter — the source holds one closed LineString and
+      // fill buckets triangulate whatever ring they receive (classifyRings
+      // gates only on the feature filter, not on geometry type), while a
+      // `Polygon`-only filter would starve the fill of its only feature.
+      id: POLYGON_FILL_LAYER,
+      type: "fill",
+      source: POLYGON_SOURCE,
+      paint: { "fill-color": ACCENT_HEX, "fill-opacity": 0.15 },
+    },
+    {
+      // Solid accent stroke of the finalized ring (auto-closed on render) —
+      // same ACCENT_HEX paint constant as the preview (finding 17), but
+      // solid rather than dashed to read as "committed".
+      id: POLYGON_LINE_LAYER,
+      type: "line",
+      source: POLYGON_SOURCE,
+      paint: { "line-color": ACCENT_HEX, "line-width": 2 },
     },
     {
       id: MARKERS_LAYER,
@@ -244,8 +272,32 @@ function toPreviewCollection(bbox: Bbox): FeatureCollection {
   return toRectangleCollection(bbox);
 }
 
+/** Closed ring for the finalized free polygon (Task 7): the first point is
+ *  appended when the caller's vertex list is open ("auto-close on render").
+ *  Stored as a GeoJSON LineString — the `draw-polygon` line layer strokes
+ *  the whole loop, and the fill layer triangulates the same ring for the
+ *  15% wash (no geometry-type filter on either layer). */
+function toPolygonCollection(coords: [number, number][]): FeatureCollection {
+  if (coords.length < 3) return EMPTY_FC;
+  const ring: number[][] = coords.map(([lon, lat]) => [lon, lat]);
+  const [firstLon, firstLat] = coords[0];
+  const [lastLon, lastLat] = coords[coords.length - 1];
+  if (lastLon !== firstLon || lastLat !== firstLat) ring.push([firstLon, firstLat]);
+  return {
+    type: "FeatureCollection",
+    features: [
+      {
+        type: "Feature",
+        geometry: { type: "LineString", coordinates: ring },
+        properties: {},
+      } satisfies Feature,
+    ],
+  };
+}
+
 /** Imperative map handles (Task 19): render/clear the drawn search rectangle;
- *  Task 6 adds the live dashed preview (R-6a). */
+ *  Task 6 adds the live dashed preview (R-6a); Task 7 adds the finalized
+ *  free-polygon ring. */
 export interface MapHandle {
   /** Draw the given box, or pass `null` to clear it (empty GeoJSON data). */
   setRectangle: (bbox: Bbox | null) => void;
@@ -254,6 +306,10 @@ export interface MapHandle {
    *  under the persisted rectangle) until the page clears it on Esc/re-arm.
    *  Distinct from the `draw-rectangle` layer; both die with `map.remove()`. */
   setPreviewRectangle: (bbox: Bbox | null) => void;
+  /** Draw the finalized free-polygon ring (auto-closed on render) in the
+   *  solid `draw-polygon` line + 15% fill layers, or clear with `null` —
+   *  the page clears it on arm/disarm of either draw tool (Task 7). */
+  setPolygon: (coords: [number, number][] | null) => void;
 }
 
 export interface MapProps {
@@ -280,9 +336,11 @@ export interface MapProps {
  * ref handle `setRectangle(bbox | null)` renders or clears the search box on
  * the dedicated GeoJSON source. Task 6 adds `setPreviewRectangle(bbox | null)`
  * driving the live preview: the `draw-preview-dot` circle at corner A and the
- * dashed `draw-preview` box that persists from corner B (R-6a). All
- * listeners die with `map.remove()` (which takes the style — sources and
- * layers — with it).
+ * dashed `draw-preview` box that persists from corner B (R-6a). Task 7 adds
+ * `setPolygon(coords | null)` for the finalized free-polygon ring (solid
+ * `draw-polygon` stroke + 15% fill). Map only forwards clicks — the
+ * double-click close gesture lives in BboxDraw. All listeners die with
+ * `map.remove()` (which takes the style — sources and layers — with it).
  */
 export default function Map({ results, onPick, onMapClick, ref }: MapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -295,15 +353,16 @@ export default function Map({ results, onPick, onMapClick, ref }: MapProps) {
   // Latest requested boxes, so a deferred `load` apply uses current data.
   const rectangleRef = useRef<Bbox | null>(null);
   const previewRectangleRef = useRef<Bbox | null>(null);
+  const polygonRef = useRef<[number, number][] | null>(null);
   const [osmVisible, setOsmVisible] = useState(false);
 
-  // Shared shape for both draw layers: record the latest box, then push it
+  // Shared shape for all draw layers: record the latest shape, then push it
   // into the GeoJSON source — immediately once the style has loaded, else on
   // the next `load` (reading the ref then, so late applies see fresh data).
-  function applyBox(
+  function applyBox<T>(
     sourceId: string,
-    boxRef: { current: Bbox | null },
-    toCollection: (bbox: Bbox) => FeatureCollection,
+    boxRef: { current: T | null },
+    toCollection: (shape: T) => FeatureCollection,
   ): void {
     const map = mapRef.current;
     if (!map) return;
@@ -324,6 +383,10 @@ export default function Map({ results, onPick, onMapClick, ref }: MapProps) {
     setPreviewRectangle(bbox: Bbox | null) {
       previewRectangleRef.current = bbox;
       applyBox(PREVIEW_SOURCE, previewRectangleRef, toPreviewCollection);
+    },
+    setPolygon(coords: [number, number][] | null) {
+      polygonRef.current = coords;
+      applyBox(POLYGON_SOURCE, polygonRef, toPolygonCollection);
     },
   }), []);
 
