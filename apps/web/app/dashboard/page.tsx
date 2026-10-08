@@ -5,6 +5,7 @@ import { useRef, useState } from "react";
 import BboxDraw, { type BboxDrawHandle } from "../../components/BboxDraw";
 import DetailPanel from "../../components/DetailPanel";
 import EmptyState from "../../components/EmptyState";
+import FirstRunGuide from "../../components/FirstRunGuide";
 // Aliased: a bare `Map` import would shadow the global `Map` constructor
 // that `unionByIdMax` below needs (`new Map(...)` would build a component).
 import MapView, { type MapHandle } from "../../components/Map";
@@ -52,7 +53,7 @@ function unionByIdMax(
  * Authenticated dashboard: SearchBar runs vector search, results flow into
  * the Map and ResultsPanel; picking a row or marker opens the DetailPanel.
  * After a search returns nothing the EmptyState offers example queries —
- * before any search the page stays blank (`searched` gate).
+ * before any search the FirstRunGuide explains how search works (`searched` gate).
  *
  * Task 19: the page owns draw mode, the last-searched text (`currentQuery`,
  * captured at submit so later edits don't leak into the bbox `q`), and the
@@ -205,7 +206,9 @@ export default function DashboardPage() {
             />
           ) : searched ? (
             <EmptyState onSuggest={handleSuggest} />
-          ) : null}
+          ) : (
+            <FirstRunGuide visible onSuggest={handleSuggest} />
+          )}
         </div>
       )}
       {tab === "3d" && <View3D results={results} />}

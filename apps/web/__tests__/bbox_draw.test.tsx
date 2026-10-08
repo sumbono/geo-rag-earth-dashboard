@@ -344,8 +344,11 @@ describe("bbox draw search", () => {
     drawClick(40, 23);
     drawClick(38, 21);
 
+    // The first-run guide renders the same chip before any search, so wait
+    // for the empty-state region first, then pin the chip inside it.
+    const emptyState = await screen.findByRole("region", { name: "No results" });
     expect(
-      await screen.findByRole("button", { name: "turquoise coastal water" }),
+      within(emptyState).getByRole("button", { name: "turquoise coastal water" }),
     ).toBeInTheDocument();
   });
 

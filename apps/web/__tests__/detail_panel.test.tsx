@@ -203,10 +203,8 @@ describe("empty state", () => {
     stubFetch(200, { results: [] });
     render(<DashboardPage />);
 
-    // First visit: no search has run, so no empty state.
-    expect(
-      screen.queryByRole("button", { name: "turquoise coastal water" }),
-    ).not.toBeInTheDocument();
+    // First visit: no search has run, so no empty state (guide chips may show).
+    expect(screen.queryByText("No results")).not.toBeInTheDocument();
 
     submitQuery("water");
 

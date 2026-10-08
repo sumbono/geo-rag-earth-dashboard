@@ -1,20 +1,16 @@
 "use client";
 
+import { EXAMPLE_QUERIES } from "../lib/suggestions";
+
 export interface EmptyStateProps {
   /** Hands the chosen example query back so the page can run the search. */
   onSuggest: (query: string) => void;
 }
 
-const SUGGESTIONS = [
-  "turquoise coastal water",
-  "desert near shoreline",
-  "cloud patterns",
-] as const;
-
 /**
  * Empty search result (Task 18): shown by the dashboard only after a search
  * has run and returned nothing. Three example queries run a fresh search on
- * click — first visit before any search stays blank instead.
+ * click — first visit before any search shows the FirstRunGuide instead.
  */
 export default function EmptyState({ onSuggest }: EmptyStateProps) {
   return (
@@ -36,7 +32,7 @@ export default function EmptyState({ onSuggest }: EmptyStateProps) {
         Try one of these searches:
       </p>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {SUGGESTIONS.map((query) => (
+        {EXAMPLE_QUERIES.map((query) => (
           <button
             key={query}
             type="button"
