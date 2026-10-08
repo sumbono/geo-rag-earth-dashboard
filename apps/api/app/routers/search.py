@@ -1,8 +1,9 @@
 """Vector search over Tile embeddings (pgvector cosine distance) + bbox search (PostGIS envelope)."""
 import json
+import math
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, literal, select
 from sqlalchemy.orm import Session
@@ -123,6 +124,101 @@ def search_bbox(
         Tile.captured_at,
     )
     if payload.q is not None:
+        vec = get_encoder(settings).encode_text(payload.q)
+        assert vec.shape == (512,), f"encoder dim drift: got shape {vec.shape}, expected (512,)"
+        dist = Tile.embedding.cosine_distance(vec)
+        stmt = (
+            select(*cols, (1 - dist).label("score"))
+            .where(spatial)
+            .order_by(dist)
+            .limit(limit)
+        )
+    else:
+        stmt = (
+            select(*cols, literal(0.0).label("score"))
+            .where(spatial)
+            .order_by(Tile.captured_at.desc())
+            .limit(limit)
+        )
+    return VectorSearchResponse(results=[_row_to_result(row) for row in session.execute(stmt)])
+
+
+def _validate_polygon(points: list) -> list:
+    """Return a normalized closed ring or raise 422 (Review Focus #1)."""
+    if not isinstance(points, list) or len(points) < 3 or len(points) > 64:
+        raise HTTPException(status_code=422, detail="polygon must have 3 to 64 points")
+    ring: list[list[float]] = []
+    for point in points:
+        if (
+            not isinstance(point, (list, tuple))
+            or len(point) != 2
+            or not all(isinstance(c, (int, float)) and math.isfinite(c) for c in point)
+        ):
+            raise HTTPException(status_code=422, detail="each point must be [lon, lat] numbers")
+        lon, lat = float(point[0]), float(point[1])
+        if not (-180 <= lon <= 180 and -90 <= lat <= 90):
+            raise HTTPException(status_code=422, detail="coordinates out of bounds")
+        ring.append([lon, lat])
+    if ring[0] == ring[-1]:
+        ring = ring[:-1]  # duplicate closing vertex normalized away
+    if len(ring) < 3:
+        raise HTTPException(status_code=422, detail="polygon must have 3 to 64 points")
+    # shoelace — zero area (collinear or degenerate) is a user mistake, not a 500
+    area = abs(
+        sum(
+            ring[i][0] * ring[(i + 1) % len(ring)][1]
+            - ring[(i + 1) % len(ring)][0] * ring[i][1]
+            for i in range(len(ring))
+        )
+    ) / 2.0
+    if area <= 1e-12:
+        raise HTTPException(status_code=422, detail="polygon has no area")
+    return ring
+
+
+class PolygonSearchRequest(BaseModel):
+    """`{"polygon": [[lon, lat], ...], "q": str | null, "limit": int = 12}`.
+
+    `limit` is validated by the model alone (ge=1, le=12 → out-of-range is a
+    422; there is NO separate clamp — finding 28's single mechanism).
+    """
+    polygon: list
+    q: str | None = None
+    limit: int = Field(default=12, ge=1, le=12)
+
+
+@router.post("/search/polygon", response_model=VectorSearchResponse)
+@limiter.limit("60/minute")
+def search_polygon(
+    request: Request,
+    payload: PolygonSearchRequest,
+    user: User = Depends(verify_jwt),
+    session: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> VectorSearchResponse:
+    """Tiles intersecting a client-drawn ring, optionally cosine-ranked by `q`.
+
+    The ring is validated here (3–64 finite in-bounds points, non-zero
+    shoelace area; a duplicate closing vertex is normalized away), closed,
+    and handed to PostGIS as WKT. Without `q` there is no similarity to score,
+    so `score` is 0.0 for every row — identical to /search/bbox no-q mode.
+    Results cap at 12 regardless of the requested limit (Global Constraint).
+    """
+    ring = _validate_polygon(payload.polygon)
+    wkt = (
+        "POLYGON(("
+        + ", ".join(f"{lon} {lat}" for lon, lat in ring)
+        + f", {ring[0][0]} {ring[0][1]}))"  # closed
+    )
+    poly = func.ST_GeomFromText(wkt, 4326)  # func pattern — no geoalchemy2 symbol imports (finding 19)
+    spatial = func.ST_Intersects(Tile.bbox, poly)
+    limit = min(payload.limit, 12)  # Global Constraint: LIMIT 12
+    cols = (
+        Tile.id,
+        func.ST_AsGeoJSON(Tile.bbox).label("bbox_json"),
+        Tile.captured_at,
+    )
+    if payload.q:
         vec = get_encoder(settings).encode_text(payload.q)
         assert vec.shape == (512,), f"encoder dim drift: got shape {vec.shape}, expected (512,)"
         dist = Tile.embedding.cosine_distance(vec)
