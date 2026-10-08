@@ -22,7 +22,9 @@ const hoisted = vi.hoisted(() => {
   class MockPopup {
     setLngLat = vi.fn((): any => this);
     setHTML = vi.fn((): any => this);
+    setDOMContent = vi.fn((): any => this);
     addTo = vi.fn((): any => this);
+    remove = vi.fn();
   }
 
   class MockMap {

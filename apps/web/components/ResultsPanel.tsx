@@ -7,6 +7,10 @@ export interface ResultsPanelProps {
   /** Currently picked hit — highlighted row; owned by the page. */
   selectedId?: string | null;
   onPick: (id: string) => void;
+  /** Cross-highlight feed (Task 9): row hover/focus → `id`, leave/blur →
+   *  `null`. Optional so existing renders without it stay valid (finding 13);
+   *  the page mirrors it onto the map/3D `hoveredId` paint. */
+  onHover?: (id: string | null) => void;
 }
 
 /**
@@ -23,6 +27,7 @@ export default function ResultsPanel({
   results,
   selectedId,
   onPick,
+  onHover,
 }: ResultsPanelProps) {
   return (
     <ul
@@ -48,6 +53,10 @@ export default function ResultsPanel({
               data-testid="result-row"
               aria-current={selected ? "true" : undefined}
               onClick={() => onPick(result.id)}
+              onMouseEnter={() => onHover?.(result.id)}
+              onMouseLeave={() => onHover?.(null)}
+              onFocus={() => onHover?.(result.id)}
+              onBlur={() => onHover?.(null)}
             >
               <span>{result.score.toFixed(2)}</span>
               <span>{result.captured_at.slice(0, 10)}</span>

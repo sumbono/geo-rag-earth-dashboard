@@ -29,7 +29,9 @@ const hoisted = vi.hoisted(() => {
     }
     setLngLat = vi.fn((): any => this);
     setHTML = vi.fn((): any => this);
+    setDOMContent = vi.fn((): any => this);
     addTo = vi.fn((): any => this);
+    remove = vi.fn();
   }
 
   class MockMap {
@@ -319,9 +321,11 @@ describe("map", () => {
 
     const popup = hoisted.popups.at(-1);
     expect(popup.setLngLat).toHaveBeenCalledWith([38.05, 21.05]);
-    const html = popup.setHTML.mock.calls[0][0] as string;
-    expect(html).toContain("0.88");
-    expect(html).toContain("2024-05-01");
+    // Task 9: content is DOM-built (setDOMContent), never setHTML.
+    expect(popup.setHTML).not.toHaveBeenCalled();
+    const content = popup.setDOMContent.mock.calls[0][0] as HTMLElement;
+    expect(content.textContent).toContain("0.88");
+    expect(content.textContent).toContain("2024-05-01");
     expect(popup.addTo).toHaveBeenCalledWith(map);
 
     // rows mark position in the list → aria-current, not aria-pressed (audit #13)

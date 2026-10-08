@@ -76,6 +76,9 @@ function unionByIdMax(
 export default function DashboardPage() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Cross-highlight (Task 9): the row under the pointer/keyboard focus —
+  // fed to Map (marker paint) and View3D (point scale/accent) as one prop.
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [searched, setSearched] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -100,8 +103,22 @@ export default function DashboardPage() {
   function handleResults(next: SearchResult[]) {
     setResults(next);
     setSelectedId(null);
+    setHoveredId(null);
     setLoading(false);
     setError(null);
+  }
+
+  /** Prev/next step through the ranked hits with wrap-around (Task 9).
+   *  Early-returns when there is nothing to cycle: fewer than 2 results, or
+   *  no selection — the ArrowLeft/Right listener lives inside DetailPanel,
+   *  which only mounts once something is selected, so a "select index 0 from
+   *  nothing" branch would be unreachable dead code (finding 21); the first
+   *  selection always happens by click. */
+  function handlePrevNext(delta: 1 | -1) {
+    if (results.length < 2 || selectedId === null) return;
+    const index = results.findIndex((result) => result.id === selectedId);
+    if (index === -1) return;
+    setSelectedId(results[(index + delta + results.length) % results.length].id);
   }
 
   function handleError(err: unknown) {
@@ -214,6 +231,7 @@ export default function DashboardPage() {
           <MapView
             ref={mapRef}
             results={results}
+            hoveredId={hoveredId}
             onPick={setSelectedId}
             onMapClick={
               drawShape !== null
@@ -226,6 +244,7 @@ export default function DashboardPage() {
               results={results}
               selectedId={selectedId}
               onPick={setSelectedId}
+              onHover={setHoveredId}
             />
           ) : searched ? (
             <EmptyState onSuggest={handleSuggest} />
@@ -234,7 +253,7 @@ export default function DashboardPage() {
           )}
         </div>
       )}
-      {tab === "3d" && <View3D results={results} />}
+      {tab === "3d" && <View3D results={results} hoveredId={hoveredId} />}
       {tab === "telemetry" && <TelemetryChart />}
       {selectedTile !== null && (
         <DetailPanel
@@ -242,6 +261,7 @@ export default function DashboardPage() {
           tile={selectedTile}
           results={results}
           onClose={() => setSelectedId(null)}
+          onNavigate={handlePrevNext}
         />
       )}
     </main>

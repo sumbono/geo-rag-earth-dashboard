@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import ScoreBarChart from "./ScoreBarChart";
 import type { SearchResult } from "../lib/types";
 
@@ -10,6 +10,11 @@ export interface DetailPanelProps {
   onClose: () => void;
   /** All ranked hits for the embedded chart; defaults to just `tile`. */
   results?: SearchResult[];
+  /** Prev/next step through `results` (Task 9). Optional so existing renders
+   *  without it stay valid (finding 13); the page wraps the index modulo
+   *  `results.length`. Wired to the header buttons AND ArrowLeft/ArrowRight
+   *  on `window` (listener removed on unmount). */
+  onNavigate?: (delta: 1 | -1) => void;
 }
 
 /** Flatten every ring's points into an axis-aligned "W, S → E, N" string. */
@@ -46,10 +51,35 @@ export default function DetailPanel({
   tile,
   onClose,
   results,
+  onNavigate,
 }: DetailPanelProps) {
   const [falseColor, setFalseColor] = useState(false);
   const chartResults = results ?? [tile];
   const thumbSrc = falseColor ? `${tile.thumb_url}?fc=1` : tile.thumb_url;
+
+  // Arrow keys step through results while the panel is open (Task 9). The
+  // listener lives here — the panel only mounts when a tile is selected, so
+  // there is no "select from nothing" keyboard branch on the page (finding
+  // 21). Skipped while typing in a field so editing text keeps its carets;
+  // removed on unmount so a closed panel never navigates (finding 24's
+  // cleanup pattern applied to the keydown listener).
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (event.key === "ArrowRight") onNavigate?.(1);
+      else if (event.key === "ArrowLeft") onNavigate?.(-1);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onNavigate]);
 
   return (
     <section
@@ -74,6 +104,24 @@ export default function DetailPanel({
         }}
       >
         <h2 style={{ margin: 0, fontSize: "1.05rem" }}>Tile details</h2>
+        <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
+          <button
+            type="button"
+            aria-label="Previous result"
+            onClick={() => onNavigate?.(-1)}
+            style={chipStyle}
+          >
+            ‹ Previous
+          </button>
+          <button
+            type="button"
+            aria-label="Next result"
+            onClick={() => onNavigate?.(1)}
+            style={chipStyle}
+          >
+            Next ›
+          </button>
+        </div>
         <button
           type="button"
           aria-label="Close"

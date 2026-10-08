@@ -175,20 +175,34 @@ const style: StyleSpecification = {
       type: "circle",
       source: RESULTS_SOURCE,
       paint: {
-        "circle-radius": 7,
+        // Cross-highlight (Task 9): the hovered feature (its GeoJSON `hover`
+        // property is rebuilt from the single `hoveredId` prop — no
+        // per-result listeners) paints accent + larger; everyone else keeps
+        // the plain white-ringed 7px marker.
+        "circle-radius": [
+          "case",
+          ["==", ["get", "hover"], true],
+          11,
+          7,
+        ],
         "circle-stroke-width": 1.5,
         "circle-stroke-color": "#ffffff",
         // Score ramp: low score = deep blue → high score = yellow.
         "circle-color": [
-          "interpolate",
-          ["linear"],
-          ["get", "score"],
-          0,
-          "#2563eb",
-          0.5,
-          "#38bdf8",
-          1,
-          "#facc15",
+          "case",
+          ["==", ["get", "hover"], true],
+          ACCENT_HEX,
+          [
+            "interpolate",
+            ["linear"],
+            ["get", "score"],
+            0,
+            "#2563eb",
+            0.5,
+            "#38bdf8",
+            1,
+            "#facc15",
+          ],
         ],
       },
     },
@@ -212,7 +226,10 @@ function ringCentroid(ring: number[][]): [number, number] {
   return [sumLng / count, sumLat / count];
 }
 
-function toFeatureCollection(results: SearchResult[]): FeatureCollection {
+function toFeatureCollection(
+  results: SearchResult[],
+  hoveredId: string | null | undefined,
+): FeatureCollection {
   return {
     type: "FeatureCollection",
     features: results.map((result) => {
@@ -227,6 +244,9 @@ function toFeatureCollection(results: SearchResult[]): FeatureCollection {
           date: result.captured_at.slice(0, 10),
           lng,
           lat,
+          // The marker paint reads this in its `case` expression — the whole
+          // cross-highlight is one data push, never a per-marker listener.
+          hover: result.id === hoveredId,
         },
       } satisfies Feature;
     }),
@@ -315,6 +335,10 @@ export interface MapHandle {
 export interface MapProps {
   results: SearchResult[];
   onPick: (id: string) => void;
+  /** Cross-highlight (Task 9): the hovered hit id — marker paint (accent +
+   *  larger radius) derives from it in the `circle-*` expressions. No
+   *  per-result listeners; a single data push repaints every marker. */
+  hoveredId?: string | null;
   /** Latest draw-mode map click as `[lon, lat]`; only passed while drawing. */
   onMapClick?: (lonLat: [number, number]) => void;
   ref?: Ref<MapHandle>;
@@ -329,7 +353,11 @@ export interface MapProps {
  * via `onPick`. The map is created once in an effect (SSR never runs it; the
  * `typeof window` guard is belt-and-braces) and destroyed with `map.remove()`
  * on unmount. Each `results` change pushes a fresh FeatureCollection into the
- * source and flies to the first hit.
+ * source and flies to the first hit. Task 9 adds the `hoveredId`
+ * cross-highlight (one data push repaints the hovered marker accent+larger)
+ * and reworks the popup into a single ref-held instance, closed before every
+ * reopen and on unmount, whose content is built with `createElement` +
+ * `textContent` (no `setHTML`).
  *
  * Task 19: a plain map `click` listener forwards `[lon, lat]` to the latest
  * `onMapClick` (the page only supplies one while draw mode is armed), and the
@@ -342,7 +370,13 @@ export interface MapProps {
  * double-click close gesture lives in BboxDraw. All listeners die with
  * `map.remove()` (which takes the style — sources and layers — with it).
  */
-export default function Map({ results, onPick, onMapClick, ref }: MapProps) {
+export default function Map({
+  results,
+  onPick,
+  hoveredId,
+  onMapClick,
+  ref,
+}: MapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   // Keep the latest callbacks without re-running the init effect.
@@ -354,6 +388,13 @@ export default function Map({ results, onPick, onMapClick, ref }: MapProps) {
   const rectangleRef = useRef<Bbox | null>(null);
   const previewRectangleRef = useRef<Bbox | null>(null);
   const polygonRef = useRef<[number, number][] | null>(null);
+  // Single popup instance (Task 9, audit major #6): closed before every
+  // reopen and on unmount — never a leak of stacked string-HTML popups.
+  const popupRef = useRef<Popup | null>(null);
+  // The results effect re-runs on `results` alone (so hovers don't re-fly);
+  // this mirror keeps its deferred apply painted with the current hover.
+  const hoveredIdRef = useRef(hoveredId);
+  hoveredIdRef.current = hoveredId;
   const [osmVisible, setOsmVisible] = useState(false);
 
   // Shared shape for all draw layers: record the latest shape, then push it
@@ -411,9 +452,19 @@ export default function Map({ results, onPick, onMapClick, ref }: MapProps) {
       const feature = event.features?.[0];
       if (!feature) return;
       const { id, score_display, date, lng, lat } = feature.properties;
-      new Popup()
+      // Close-before-reopen: one popup at a time (audit major #6).
+      popupRef.current?.remove();
+      // DOM-built content — `textContent`, never `setHTML` string
+      // interpolation (the audit's XSS-by-concatenation concern).
+      const el = document.createElement("div");
+      const score = document.createElement("strong");
+      score.textContent = `Score ${String(score_display)}`;
+      const day = document.createElement("div");
+      day.textContent = String(date);
+      el.append(score, day);
+      popupRef.current = new Popup()
         .setLngLat([Number(lng), Number(lat)])
-        .setHTML(`<strong>${String(score_display)}</strong><br/>${String(date)}`)
+        .setDOMContent(el)
         .addTo(map);
       if (typeof id === "string") onPickRef.current(id);
     });
@@ -428,11 +479,16 @@ export default function Map({ results, onPick, onMapClick, ref }: MapProps) {
 
     return () => {
       delete (container as MapContainer).__maplibreMap;
+      popupRef.current?.remove();
+      popupRef.current = null;
       map.remove();
       mapRef.current = null;
     };
   }, []);
 
+  // Fresh results: push the collection (painted with the CURRENT hover via
+  // the mirror ref) and fly to the first hit — hovers re-run only the effect
+  // below, so pointing at rows never re-fires the camera.
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -441,7 +497,7 @@ export default function Map({ results, onPick, onMapClick, ref }: MapProps) {
       const source = map.getSource(RESULTS_SOURCE) as
         | GeoJSONSource
         | undefined;
-      source?.setData(toFeatureCollection(results));
+      source?.setData(toFeatureCollection(results, hoveredIdRef.current));
       if (results.length > 0) {
         map.flyTo({ center: ringCentroid(results[0].bbox[0]), zoom: 10 });
       }
@@ -454,6 +510,27 @@ export default function Map({ results, onPick, onMapClick, ref }: MapProps) {
       map.once("load", apply);
     }
   }, [results]);
+
+  // Cross-highlight (Task 9): re-push the same results with the new `hover`
+  // flags — one data-driven repaint, no per-marker listeners (Review Focus
+  // #4: nothing here accumulates across hovers).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const apply = () => {
+      const source = map.getSource(RESULTS_SOURCE) as
+        | GeoJSONSource
+        | undefined;
+      source?.setData(toFeatureCollection(results, hoveredId));
+    };
+
+    if (map.getSource(RESULTS_SOURCE)) {
+      apply();
+    } else {
+      map.once("load", apply);
+    }
+  }, [results, hoveredId]);
 
   function toggleOsm() {
     const next = !osmVisible;

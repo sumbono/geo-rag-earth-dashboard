@@ -25,6 +25,12 @@ const HEIGHT_PER_SCORE = 20;
 const MARKER_RADIUS = 1.6;
 /** Below this the result set has no spread; keep a sane unit scale. */
 const SPREAD_EPSILON = 1e-9;
+/** Hover scale for the cross-highlighted point (Task 9). */
+const HOVER_SCALE = 1.4;
+/** Brand accent as an RGB triple — mirrors `ACCENT_HEX` / `--color-accent`
+ *  (three.js' `Color` cannot take a hex string argument portably here, and
+ *  the component tests mock `Color` with a numeric constructor). */
+const HOVER_COLOR = new Color(0x0b / 255, 0x6f / 255, 0x8f / 255);
 
 /** Centroid of a GeoJSON Polygon's outer ring (closing duplicate dropped) —
  *  same convention as the Map's result markers. */
@@ -60,6 +66,9 @@ function projectionScale(results: SearchResult[]): number {
 
 export interface View3DProps {
   results: SearchResult[];
+  /** Cross-highlight (Task 9): the hovered hit renders ×1.4 larger in the
+   *  accent color — one rebuild from props, no per-point listeners. */
+  hoveredId?: string | null;
 }
 
 /**
@@ -76,7 +85,7 @@ export interface View3DProps {
  * instead of crashing. The page imports this component with
  * `next/dynamic(..., { ssr: false })`, so three.js never loads during SSR.
  */
-export default function View3D({ results }: View3DProps) {
+export default function View3D({ results, hoveredId }: View3DProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const sceneRef = useRef<Scene | null>(null);
   const [unavailable, setUnavailable] = useState(false);
@@ -157,8 +166,9 @@ export default function View3D({ results }: View3DProps) {
     };
   }, []);
 
-  // Rebuild the markers when the results change — the camera, renderer and
-  // orbit state survive; the old geometry/materials are disposed.
+  // Rebuild the markers when the results OR the cross-highlight change —
+  // the camera, renderer and orbit state survive; the old geometry/materials
+  // are disposed. The hovered point alone scales ×1.4 and takes the accent.
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
@@ -167,11 +177,13 @@ export default function View3D({ results }: View3DProps) {
     const meshes = results.map((result) => {
       const [lng, lat] = ringCentroid(result.bbox[0]);
       const score = Math.min(Math.max(result.score, 0), 1);
-      // Blue (0, 0, 1) → yellow (1, 1, 0), t = score.
+      const hovered = result.id === hoveredId;
+      // Blue (0, 0, 1) → yellow (1, 1, 0), t = score; accent when hovered.
       const material = new MeshBasicMaterial({
-        color: new Color(score, score, 1 - score),
+        color: hovered ? HOVER_COLOR : new Color(score, score, 1 - score),
       });
       const mesh = new Mesh(new SphereGeometry(MARKER_RADIUS), material);
+      if (hovered) mesh.scale.set(HOVER_SCALE, HOVER_SCALE, HOVER_SCALE);
       mesh.position.set(
         (lng - CENTER_LON) * scale,
         result.score * HEIGHT_PER_SCORE,
@@ -188,7 +200,7 @@ export default function View3D({ results }: View3DProps) {
         mesh.material.dispose();
       }
     };
-  }, [results]);
+  }, [results, hoveredId]);
 
   if (unavailable) {
     return <p>3D unavailable</p>;
