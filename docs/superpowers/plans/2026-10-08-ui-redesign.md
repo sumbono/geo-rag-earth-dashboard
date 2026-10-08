@@ -80,8 +80,7 @@ docs/
 
 ```tsx
 // apps/web/__tests__/guidance.test.tsx
-import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { vi } from "vitest";
 import FirstRunGuide from "../components/FirstRunGuide";
 
@@ -98,26 +97,27 @@ describe("FirstRunGuide", () => {
     expect(screen.queryByRole("heading", { name: /how this works/i })).not.toBeInTheDocument();
   });
 
-  it("suggestion buttons call onSuggest with the query text", async () => {
+  it("suggestion buttons call onSuggest with the query text", () => {
     const onSuggest = vi.fn();
     render(<FirstRunGuide visible onSuggest={onSuggest} />);
-    await userEvent.click(screen.getByRole("button", { name: "turquoise coastal water" }));
+    fireEvent.click(screen.getByRole("button", { name: "turquoise coastal water" }));
     expect(onSuggest).toHaveBeenCalledWith("turquoise coastal water");
   });
 });
 ```
 
-Page-level test (appended to `apps/web/__tests__/guidance.test.tsx`), mocking `lib/api`:
+Page-level test (appended to `apps/web/__tests__/guidance.test.tsx`), mocking fetch with the repo harness (`vi.stubGlobal("fetch", fetchMock)` per `api.test.ts`, restored in `afterEach(() => vi.unstubAllGlobals())`):
 
 ```tsx
 import DashboardPage from "../app/dashboard/page";
-// fetch mock: POST /api/search/vector → { results: [ ...one SearchResult ] }
+// fetchMock resolves: POST /api/search/vector → { results: [ ...one SearchResult ] }
 
 it("shows the guide before the first search and hides it once results exist", async () => {
   render(<DashboardPage />);
   expect(screen.getByRole("heading", { name: /how this works/i })).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "Search" })); // type first
-  // ...type a query, submit, await results
+  fireEvent.change(screen.getByRole("searchbox", { name: /search/i }), { target: { value: "water" } });
+  fireEvent.click(screen.getByRole("button", { name: "Search" }));
+  await screen.findByTestId("result-row");
   expect(screen.queryByRole("heading", { name: /how this works/i })).not.toBeInTheDocument();
 });
 
@@ -229,8 +229,7 @@ git commit -m "feat: first-run guidance panel with value explainer and example q
 
 ```tsx
 // apps/web/__tests__/search-suggestions.test.tsx
-import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { vi } from "vitest";
 import SearchBar from "../components/SearchBar";
 
@@ -249,14 +248,16 @@ it("renders all three example chips without any prior search", () => {
   }
 });
 
-it("clicking a chip calls onSuggest exactly once", async () => {
+it("clicking a chip calls onSuggest exactly once", () => {
   const onSuggest = vi.fn();
   render(<SearchBar {...base} onSuggest={onSuggest} />);
-  await userEvent.click(screen.getByRole("button", { name: "cloud patterns" }));
+  fireEvent.click(screen.getByRole("button", { name: "cloud patterns" }));
   expect(onSuggest).toHaveBeenCalledTimes(1);
   expect(onSuggest).toHaveBeenCalledWith("cloud patterns");
 });
 ```
+
+*(Repo convention note: this project uses `fireEvent` from `@testing-library/react` in every existing test file — `@testing-library/user-event` is NOT a dependency and must not be imported. All tests in this plan follow that convention.)*
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -465,7 +466,6 @@ git commit -m "feat: landing restructure — asymmetric hero per approved macros
 ```tsx
 // apps/web/__tests__/dashboard-styles.test.tsx
 import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import ResultsPanel from "../components/ResultsPanel";
 import type { SearchResult } from "../lib/types";
 
@@ -508,7 +508,7 @@ Expected: FAIL — `aria-pressed` still present on rows; raw hex found in `dashb
 
 - [ ] **Step 3: Implement**
 
-- `ResultsPanel.tsx`: row → `className="results-row"` + `aria-current={selected ? "true" : undefined}` (drop `aria-pressed`); selected styling moves to CSS: `.results-row[aria-current="true"] { background: var(--color-accent); color: var(--color-on-accent, #fff); }`; `.results-row { font-variant-numeric: tabular-nums; }`; borders/background all token-based; delete the dead `results.length === 0` placeholder branch (`:23-25` — page never mounts it empty; audit noted it).
+- `ResultsPanel.tsx`: row → `className="results-row"` **plus `data-testid="result-row"`** (Task 10's e2e selects it — this is where that testid is added); `aria-current={selected ? "true" : undefined}` (drop `aria-pressed`); selected styling moves to CSS: `.results-row[aria-current="true"] { background: var(--color-accent); color: var(--color-on-accent, #fff); }`; `.results-row { font-variant-numeric: tabular-nums; }`; borders/background all token-based; delete the dead `results.length === 0` placeholder branch (`:23-25` — page never mounts it empty; audit noted it).
 - `dashboard/page.tsx`: replace inline `style={{…}}` with classes `.dashboard`, `.dash-row`, `.dash-alert`, `.dash-status`; error color → `var(--color-danger)` (kills `#b91c1c`).
 - `EmptyState.tsx` / `BboxDraw.tsx`: dashed borders → `1px solid var(--color-border)` (audit #11); fallback-hex vars (`var(--surface, #ffffff)`) → plain `var(--color-surface)`.
 - `globals.css` append: the `.results-row`, `.guide` (Task 1 may have added minimal styles — harmonize), `.dash-*` rules with tokens only.
@@ -541,11 +541,23 @@ git commit -m "feat: dashboard design pass — tokens, aria-current rows, tabula
 
 ```tsx
 // apps/web/__tests__/draw-feedback.test.tsx
-import { render, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { fireEvent, render, waitFor } from "@testing-library/react";
 import { vi } from "vitest";
 import BboxDraw, { type BboxDrawHandle } from "../components/BboxDraw";
 import { type RefObject } from "react";
+
+// fetch harness per api.test.ts: stub globally, restore after each test
+const fetchMock = vi.fn<typeof fetch>();
+beforeEach(() => {
+  fetchMock.mockReset();
+  fetchMock.mockResolvedValue(
+    new Response(JSON.stringify({ results: [] }), { status: 200, headers: { "Content-Type": "application/json" } }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 // maplibre mocked as in search_ui.test.tsx; expose handle via ref
 function setup() {
@@ -560,7 +572,7 @@ function setup() {
   return { ref, onPreview, onRectangle, onResults, onError };
 }
 
-it("click 1 previews the degenerate box, click 2 completes it", async () => {
+it("click 1 previews the degenerate box, click 2 completes it", () => {
   const { ref, onPreview, onRectangle } = setup();
   ref.current!.handleMapClick([39.0, 21.0]);
   expect(onPreview).toHaveBeenCalledWith([[39, 21], [39, 21]]);
@@ -571,20 +583,20 @@ it("click 1 previews the degenerate box, click 2 completes it", async () => {
 
 it("rectangle is emitted BEFORE the request resolves (visual-first)", async () => {
   const { ref, onRectangle, onResults } = setup();
-  let resolveFetch!: (v: { results: never[] }) => void;
-  global.fetch = vi.fn(() => new Promise((r) => { resolveFetch = r; })) as never;
+  let resolveFetch!: (value: Response) => void;
+  fetchMock.mockReturnValueOnce(new Promise((resolve) => { resolveFetch = resolve; }));
   ref.current!.handleMapClick([39.0, 21.0]);
   ref.current!.handleMapClick([39.2, 21.2]);
   expect(onRectangle).toHaveBeenCalledTimes(1);   // fired while fetch is pending
   expect(onResults).not.toHaveBeenCalled();
-  resolveFetch({ results: [] });
+  resolveFetch(new Response(JSON.stringify({ results: [] }), { status: 200 }));
   await waitFor(() => expect(onResults).toHaveBeenCalledTimes(1));
 });
 
-it("Esc clears the preview", async () => {
+it("Esc clears the preview", () => {
   const { ref, onPreview } = setup();
   ref.current!.handleMapClick([39.0, 21.0]);
-  await userEvent.keyboard("{Escape}");
+  fireEvent.keyDown(window, { key: "Escape" });
   expect(onPreview).toHaveBeenLastCalledWith(null);
 });
 ```
@@ -633,32 +645,42 @@ git commit -m "feat: live on-map draw preview; rectangle renders before the fetc
 
 ```tsx
 // apps/web/__tests__/polygon-draw.test.tsx
-import { render, waitFor } from "@testing-library/react";
-import { userEvent } from "@testing-library/user-event";
+import { fireEvent, render, waitFor } from "@testing-library/react";
 import { vi } from "vitest";
 import BboxDraw, { type BboxDrawHandle } from "../components/BboxDraw";
 import { type RefObject } from "react";
+
+const fetchMock = vi.fn<typeof fetch>();
+beforeEach(() => {
+  fetchMock.mockReset();
+  fetchMock.mockResolvedValue(
+    new Response(JSON.stringify({ results: [] }), { status: 200, headers: { "Content-Type": "application/json" } }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 function setup() {
   const onPolygon = vi.fn();
   const onResults = vi.fn();
   const onError = vi.fn();
   const ref: RefObject<BboxDrawHandle | null> = { current: null };
-  global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ results: [] }) })) as never;
   render(
     <BboxDraw ref={ref} active polygonMode onToggle={() => {}} onTogglePolygon={() => {}} currentQuery="water" onResults={onResults} onRectangle={() => {}} onPreview={() => {}} onPolygon={onPolygon} onError={onError} />,
   );
   return { ref, onPolygon, onResults, onError };
 }
 
-it("accumulates vertices and refuses to close with fewer than 3", async () => {
+it("accumulates vertices and refuses to close with fewer than 3", () => {
   const { ref, onPolygon } = setup();
   ref.current!.handleMapClick([39.0, 21.0]);
   ref.current!.handleMapClick([39.1, 21.0]);
-  await userEvent.keyboard("{Enter}");
+  fireEvent.keyDown(window, { key: "Enter" });
   expect(onPolygon).not.toHaveBeenCalled();
   ref.current!.handleMapClick([39.05, 21.1]);
-  await userEvent.keyboard("{Enter}");
+  fireEvent.keyDown(window, { key: "Enter" });
   expect(onPolygon).toHaveBeenCalledWith([[39.0, 21.0], [39.1, 21.0], [39.05, 21.1]]);
 });
 
@@ -667,23 +689,25 @@ it("POSTs /api/search/polygon with polygon and q, then lifts results", async () 
   ref.current!.handleMapClick([39.0, 21.0]);
   ref.current!.handleMapClick([39.1, 21.0]);
   ref.current!.handleMapClick([39.05, 21.1]);
-  await userEvent.keyboard("{Enter}");
+  fireEvent.keyDown(window, { key: "Enter" });
   await waitFor(() => expect(onResults).toHaveBeenCalledTimes(1));
-  expect(global.fetch).toHaveBeenCalledWith("/api/search/polygon", expect.objectContaining({
+  expect(fetchMock).toHaveBeenCalledWith("/api/search/polygon", expect.objectContaining({
     method: "POST",
     body: JSON.stringify({ polygon: [[39, 21], [39.1, 21], [39.05, 21.1]], q: "water" }),
   }));
 });
 
-it("Esc clears vertices without sending", async () => {
+it("Esc clears vertices without sending", () => {
   const { ref, onPolygon } = setup();
   ref.current!.handleMapClick([39.0, 21.0]);
   ref.current!.handleMapClick([39.1, 21.0]);
-  await userEvent.keyboard("{Escape}");
-  await userEvent.keyboard("{Enter}");
+  fireEvent.keyDown(window, { key: "Escape" });
+  fireEvent.keyDown(window, { key: "Enter" });
   expect(onPolygon).not.toHaveBeenCalled();
 });
 ```
+
+**Mutual-exclusion precedence (binding):** `handleMapClick` routes to the polygon machine when `polygonMode` is true, else to the rect machine — the page guarantees both flags are never true at once (`drawShape` state), and the component must still prefer `polygonMode` if both ever arrive (defensive first-branch).
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -728,6 +752,8 @@ git commit -m "feat: free-polygon draw machine with vertex preview and close ges
 # apps/api/tests/test_search_polygon.py
 import pytest
 
+from tests.helpers import login   # repo convention: a FUNCTION, not a fixture
+
 pytestmark = pytest.mark.db
 
 def _polygon(n_extra=0):
@@ -743,14 +769,19 @@ def test_polygon_requires_auth(create_client):
     ([[39.0, 21.0], [39.1, 21.0], [39.2, 21.0]], "collinear zero area"),
     ([[181.0, 21.0], [181.1, 21.0], [181.05, 21.1]], "out of bounds"),
 ])
-def test_polygon_validation_422(create_client, login, polygon, reason):
+def test_polygon_validation_422(create_client, polygon, reason):
+    # Repo convention: helpers.py login(client) is a FUNCTION, not a fixture —
+    # call it explicitly; there is no pytest fixture named `login`.
+    login(create_client)
     assert create_client.post("/search/polygon", json={"polygon": polygon}).status_code == 422, reason
 
-def test_too_many_points_422(create_client, login):
+def test_too_many_points_422(create_client):
+    login(create_client)
     pts = [[39.0 + i * 0.001, 21.0 + (i % 2) * 0.001] for i in range(65)]
     assert create_client.post("/search/polygon", json={"polygon": pts}).status_code == 422
 
-def test_closed_ring_normalized_and_returns_only_intersects(create_client, login, seeded_tiles):
+def test_closed_ring_normalized_and_returns_only_intersects(create_client, seeded_tiles):
+    login(create_client)
     ring = _polygon() + [_polygon()[0]]  # duplicate closing vertex
     r = create_client.post("/search/polygon", json={"polygon": ring})
     assert r.status_code == 200
@@ -758,7 +789,8 @@ def test_closed_ring_normalized_and_returns_only_intersects(create_client, login
     # seeded tiles span 35.0–35.5E / 20.0–20.01N; this triangle (39E/21N) intersects none
     assert ids == set()
 
-def test_polygon_with_q_ranks_within_filter(create_client, login, seeded_tiles):
+def test_polygon_with_q_ranks_within_filter(create_client, seeded_tiles):
+    login(create_client)
     # a box-shaped ring around the seeded band, with the coral query
     ring = [[35.0, 19.99], [35.6, 19.99], [35.6, 20.02], [35.0, 20.02]]
     r = create_client.post("/search/polygon", json={"polygon": ring, "q": "turquoise coral reef"})
@@ -770,12 +802,13 @@ def test_polygon_with_q_ranks_within_filter(create_client, login, seeded_tiles):
     scores = [row["score"] for row in results]
     assert scores == sorted(scores, reverse=True)
 
-def test_non_point_entries_422(create_client, login):
+def test_non_point_entries_422(create_client):
+    login(create_client)
     bad_shape = {"polygon": [[39.0, 21.0], [39.1, 21.0], "not-a-point"]}
     assert create_client.post("/search/polygon", json=bad_shape).status_code == 422
 ```
 
-*(The `parametrize` in `test_polygon_validation_422` carries exactly the three valid rows shown — collinear, out-of-bounds, <3 points — plus this standalone `bad_shape` test. No placeholder rows.)*
+*(The `parametrize` in `test_polygon_validation_422` carries exactly the three valid rows shown — collinear, out-of-bounds, <3 points — plus this standalone `bad_shape` test. No placeholder rows. All tests call `login(create_client)` explicitly — the repo has no `login` fixture.)*
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -879,7 +912,6 @@ git commit -m "feat: POST /search/polygon — validated ring → ST_Intersects s
 ```tsx
 // apps/web/__tests__/interactive-info.test.tsx
 import { render, screen, fireEvent } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import ResultsPanel from "../components/ResultsPanel";
 import DetailPanel from "../components/DetailPanel";
@@ -900,13 +932,13 @@ it("row hover/focus emits onHover(id) and leave emits null", () => {
   fireEvent.blur(row);   expect(onHover).toHaveBeenLastCalledWith(null);
 });
 
-it("DetailPanel prev/next navigates through results", async () => {
+it("DetailPanel prev/next navigates through results", () => {
   const onNavigate = vi.fn();
   const onClose = vi.fn();
   render(<DetailPanel tile={results[0]} results={results} onClose={onClose} onNavigate={onNavigate} />);
-  await userEvent.click(screen.getByRole("button", { name: /previous/i }));
+  fireEvent.click(screen.getByRole("button", { name: /previous/i }));
   expect(onNavigate).toHaveBeenCalledWith(-1);
-  await userEvent.click(screen.getByRole("button", { name: /next/i }));
+  fireEvent.click(screen.getByRole("button", { name: /next/i }));
   expect(onNavigate).toHaveBeenCalledWith(1);
 });
 
@@ -984,7 +1016,7 @@ test("first-run guide and suggestion chips lead to results", async ({ page }) =>
   await page.getByRole("button", { name: "turquoise coastal water" }).first().click();
   await searchPromise;
   await expect(page.getByRole("heading", { name: /how this works/i })).toHaveCount(0);
-  await expect(page.getByTestId("result-row").first()).toBeVisible(); // data-testid added in Task 5 markup (see note)
+  await expect(page.getByTestId("result-row").first()).toBeVisible(); // testid added in Task 5's ResultsPanel step
 });
 
 test("polygon draw searches an area", async ({ page }) => {
@@ -1004,7 +1036,7 @@ test("polygon draw searches an area", async ({ page }) => {
 });
 ```
 
-**Note:** `data-testid="result-row"` is added to each `<li>`/row in `ResultsPanel` during this task (one-line addition — do it in Step 3 with a matching RTL assertion).
+**Note:** `data-testid="result-row"` is added to each row in `ResultsPanel` by **Task 5's implementation step** (already in this plan) — Task 10 only consumes it; no markup change happens in this task.
 
 - [ ] **Step 2: Run the full local gates**
 
