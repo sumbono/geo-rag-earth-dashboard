@@ -24,91 +24,112 @@ h3 {
   letter-spacing: -0.02em;
 }
 
+/* Hallmark · genre: modern-minimal · macrostructure: Workbench (marketing) · design-system: design.md · designed-as-app */
+
+/* --- landing shell (Workbench macrostructure, design.md § Macrostructure) --- */
 .landing {
-  max-width: 68rem;
-  margin: 0 auto;
-  padding: 0 1.5rem 3rem;
+  --landing-max: 68rem;
+  width: 100%;
 }
 
-/* --- nav --- */
+/* --- 1. bordered nav (design.md § Nav and footer) --- */
 .landing__nav {
+  border-bottom: var(--rule);
+  background: var(--color-paper);
+}
+
+.landing__nav-inner {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1.25rem 0;
+  gap: var(--space-md);
+  max-width: var(--landing-max);
+  margin: 0 auto;
+  padding: var(--space-sm) var(--space-md);
 }
 
 .landing__brand {
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--color-ink);
 }
 
 .landing__nav-link {
-  color: var(--color-accent-strong);
-  font-weight: 600;
+  color: var(--color-ink-2);
+  font-weight: 500;
   text-decoration: none;
 }
 
 .landing__nav-link:hover,
 .landing__nav-link:focus-visible {
-  text-decoration: underline;
+  color: var(--color-accent);
 }
 
 .landing__nav-links {
   display: flex;
   align-items: center;
-  gap: 1.25rem;
+  gap: var(--space-md);
 }
 
-/* --- hero --- */
-.hero {
-  text-align: center;
-  padding: 3.5rem 0 2.5rem;
-}
-
-.hero__eyebrow {
-  display: inline-block;
-  margin: 0 0 1rem;
-  padding: 0.3rem 0.8rem;
-  border-radius: 999px;
-  background: var(--color-paper-2);
-  border: 1px solid var(--color-rule);
-  color: var(--color-accent-strong);
-  font-size: 0.8rem;
+/* Log in as a hairline/ghost control — never a second solid fill
+   (accent discipline: the hero's "Get started" is the one solid accent) */
+.landing__nav-login {
+  padding: var(--space-2xs) var(--space-sm);
+  border: var(--rule);
+  border-radius: var(--radius-control);
+  color: var(--color-ink);
+  font-size: var(--text-sm);
   font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  text-decoration: none;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.landing__nav-login:hover,
+.landing__nav-login:focus-visible {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+/* --- 2. hero — two-column, title LEFT / proof RIGHT (kills audit #1 centering) --- */
+.hero {
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: center;
+  gap: var(--space-xl);
+  max-width: var(--landing-max);
+  margin: 0 auto;
+  padding: var(--space-2xl) var(--space-md) 0;
 }
 
 .hero h1 {
-  margin: 0 0 1rem;
-  font-family: var(--font-display);
-  font-style: normal;
-  font-size: clamp(2rem, 5vw, 3.25rem);
-  line-height: 1.1;
-  letter-spacing: -0.02em;
+  margin: 0 0 var(--space-sm);
+  font-size: var(--text-display);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
 }
 
 .hero__pitch {
-  max-width: 46rem;
-  margin: 0 auto;
-  color: var(--color-ink-soft);
-  font-size: clamp(1rem, 2vw, 1.15rem);
+  margin: 0;
+  color: var(--color-ink-2);
+  font-size: var(--text-md);
 }
 
 .hero__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
-  justify-content: center;
-  margin-top: 2rem;
+  gap: var(--space-xs);
+  justify-content: flex-start;
+  margin-top: var(--space-lg);
 }
 
-/* --- demo access card (public sandbox credentials) --- */
+/* --- demo access card (public sandbox credentials — hero proof, right column) --- */
 .demo-card {
-  display: inline-block;
-  margin-top: 1.75rem;
-  padding: 1rem 1.4rem;
+  display: block;
+  margin: 0;
+  padding: var(--space-sm) var(--space-md);
   background: var(--color-paper-2);
   border: var(--rule);
   border-radius: var(--radius-card);
@@ -201,61 +222,130 @@ input:focus-visible {
   outline-offset: 2px;
 }
 
-/* --- preview slots (real screenshots/GIF, Task 24) --- */
+/* --- 3. workbench band — hairline-framed walkthrough GIF as hero proof --- */
 .preview {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 1.25rem;
-  margin-top: 1.5rem;
+  max-width: var(--landing-max);
+  margin: var(--space-3xl) auto 0;
+  padding: 0 var(--space-md);
 }
 
 .preview__slot {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.35rem;
-  min-height: 14rem;
+  gap: var(--space-xs);
   margin: 0;
-  padding: 2rem;
+  padding: var(--space-sm);
   background: var(--color-paper-2);
   border: var(--rule);
   border-radius: var(--radius-card);
-  box-shadow: none;
-  text-align: center;
 }
 
 .preview__img {
   display: block;
   width: 100%;
   height: auto;
-  border: 1px solid var(--color-rule);
-  border-radius: calc(var(--radius-card) - 4px);
+  border: var(--rule);
+  border-radius: var(--radius-control);
 }
 
 .preview__label {
-  font-weight: 600;
-  color: var(--color-ink);
+  margin: 0;
+  color: var(--color-ink-soft);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
-/* --- footer --- */
+/* --- 4. the one dark graphite band — "How it works" (design.md signature 8) --- */
+.how {
+  margin-top: var(--space-3xl);
+  padding: var(--space-2xl) var(--space-md);
+  background: var(--color-graphite);
+  color: var(--color-graphite-ink);
+}
+
+.how__inner {
+  max-width: var(--landing-max);
+  margin: 0 auto;
+}
+
+.how__title {
+  margin: 0 0 var(--space-lg);
+  color: var(--color-graphite-ink);
+  font-size: var(--text-2xl);
+  letter-spacing: -0.02em;
+}
+
+.how__steps {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-lg);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.how__step {
+  margin: 0;
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--color-graphite-rule);
+}
+
+.how__step-label {
+  color: var(--color-graphite-ink);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.how__step-title {
+  margin: var(--space-2xs) 0;
+  color: var(--color-graphite-ink);
+  font-size: var(--text-lg);
+}
+
+.how__step-body {
+  margin: 0;
+  color: var(--color-graphite-ink);
+  font-size: var(--text-base);
+  opacity: 0.85;
+}
+
+.how__note {
+  margin: var(--space-lg) 0 0;
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--color-graphite-rule);
+  color: var(--color-graphite-ink);
+  font-size: var(--text-sm);
+  opacity: 0.85;
+}
+
+/* --- 5. single-line text-only footer (design.md § Nav and footer — no links) --- */
 .landing__footer {
-  margin-top: 3rem;
-  padding-top: 1.5rem;
-  border-top: 1px solid var(--color-rule);
+  margin-top: var(--space-3xl);
+  border-top: var(--rule);
   color: var(--color-ink-soft);
-  font-size: 0.9rem;
-  text-align: center;
+  font-size: var(--text-sm);
+}
+
+.landing__footer-line {
+  max-width: var(--landing-max);
+  margin: 0 auto;
+  padding: var(--space-sm) var(--space-md);
 }
 
 @media (min-width: 48rem) {
-  .preview {
-    grid-template-columns: 1fr 1fr;
+  .hero {
+    grid-template-columns: 7fr 5fr;
   }
 
-  .preview__slot--wide {
-    grid-column: 1 / -1;
-    min-height: 16rem;
+  .how__steps {
+    grid-template-columns: repeat(3, 1fr);
   }
 }
 
