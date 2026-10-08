@@ -8,13 +8,14 @@
 
 **Tech Stack:** Next.js 15 (App Router, client components), TypeScript, plain CSS custom properties (no CSS framework), maplibre-gl v6 (existing), Three.js (existing), D3 (existing), FastAPI + SQLAlchemy/GeoAlchemy2 + pgvector (existing), Vitest + RTL, Playwright. **No new runtime npm/pip dependencies** (fonts self-hosted via `next/font` — no new package).
 
-**Spec:** `/home/bono/portfolio/geo-rag-ui-audit.md` (the Hallmark audit — 15 findings, each with file:line and fix). The plan argues from the audit; executors read both. The five user-reported issues are audit findings 3 (guidance/value), 4 (suggestions), 5 (polygon draw), 6→10 (interactive info), and the design pass covers 1–2 + 7–9 + minors 11–15.
+**Spec:** `/home/bono/portfolio/geo-rag-ui-audit.md` (the Hallmark audit — 15 findings, each with file:line and fix) **+ `design.md` at the repo root** (the locked design system — user-confirmed 2026-10-08; it wins over any per-build reference on visual questions). The plan argues from these; executors read both. The five user-reported issues are audit findings 3 (guidance/value), 4 (suggestions), 5 (polygon draw), 6→10 (interactive info), and the design pass covers 1–2 + 7–9 + minors 11–15.
 
 ## Global Constraints
 
 - All suites stay green at every task boundary: `cd apps/api && ../.venv/bin/pytest -q -m "not ml"` (75+), `cd etl && ../.venv/bin/pytest -q -m "not smoke"` (38+), `cd apps/web && npm test` (70+), `npx tsc --noEmit`, `npm run build`, `.venv/bin/ruff check .` (exit 0).
 - E2E selectors that must keep working (Task 10 runs them): heading `Geo-RAG Earth Dashboard`, `data-testid="gif-slot"`, `data-testid="demo-access-card"`, GitHub link name `/github repository/i`, login link, `aria-pressed` tab buttons, `OSM streets` toggle, dashboard search submit flow.
-- **No new runtime dependencies.** Two font files via `next/font/google` are allowed (build-time fetch, next/font caches); no npm packages, no pip packages.
+- **No new runtime dependencies.** Three font families via `next/font/google` are allowed — Space Grotesk, Inter, JetBrains Mono (design.md Typography; plan's earlier "two families" amended by user confirmation 2026-10-08); no npm packages, no pip packages.
+- **`design.md` (repo root) is the binding design system** for every visual decision in Tasks 3–5: tokens, type, radii (6px control / 10px card), hairline structure, accent teal, mono data values, stamps. Where this plan and `design.md` disagree, `design.md` wins.
 - After Task 3: every color/font/easing/focus value in `apps/web` CSS references a `tokens.css` token — no inline hex/OKLCH in TSX `style={{}}` for colors (layout-only inline styles tolerated where a token adds nothing); `--color-danger` is the only red; `#1d4ed8` is removed from the palette entirely.
 - API constants unchanged: `LIMIT 12` clamp on every search endpoint; UTC timestamps; SearchResult shape `{id, thumb_url, bbox, score, captured_at}` unchanged for the existing endpoints.
 - Scrub rule: no application/job-targeting wording anywhere in UI copy, docs, or commits.
@@ -314,74 +315,56 @@ git commit -m "feat: always-visible example-query chips under the search bar"
 - Modify: `apps/web/app/layout.tsx` (font + token import), `apps/web/app/globals.css` (append-only migration of base rules)
 
 **Interfaces:**
-- Consumes: audit findings 1–2 (centered template, one-font), 8 (body gradient), 9 (default easing), 10 (focus rings); existing `:root` tokens at `globals.css:1-12`.
-- Produces: `tokens.css` defines — `--color-paper`, `--color-surface`, `--color-ink`, `--color-ink-soft`, `--color-accent`, `--color-accent-strong`, `--color-accent-soft`, `--color-danger`, `--color-border`, `--font-display`, `--font-body`, `--space-1..8` (4pt scale), `--text-display/-s/-2xl/-xl/-lg/-base/-sm`, `--ease-out: cubic-bezier(0.16, 1, 0.3, 1)`, `--dur-fast: 120ms`, `--dur-base: 200ms`, `--focus-ring: 2px solid var(--color-accent)`, `--radius`, `--shadow` — plus `docs/redesign-decisions.md` recording macrostructure/theme/palette/font pair/nav+footer archetypes from the approved preview. `layout.tsx` imports `./tokens.css` before `./globals.css` and loads the two fonts via `next/font/google` with `variable` names `--font-display` / `--font-body`.
+- Consumes: **`design.md` (repo root — locked, user-confirmed 2026-10-08)**; audit findings 1–2 (centered template, one-font), 8 (body gradient), 9 (default easing), 10 (focus rings); existing `:root` tokens at `globals.css:1-12`.
+- Produces: `apps/web/tokens.css` = the **`design.md` Exports → tokens.css block copied verbatim**, plus three runtime-only tokens it needs: `--focus-ring: 2px solid var(--color-accent)`, `--shadow-lift: 0 1px 2px oklch(24% 0.02 258 / 0.05)` (Cobalt's single allowed lift), `--dur-reveal: 600ms` (already in Exports — verify, don't duplicate). `layout.tsx` imports `./tokens.css` BEFORE `./globals.css` and loads **three** families via `next/font/google`: `Space_Grotesk` → `variable: "--font-display-local"`, `Inter` → `"--font-body-local"`, `JetBrains_Mono` → `"--font-mono-local"`, all `display: "swap"`, applied as className variables on `<body>`. No `docs/redesign-decisions.md` — `design.md` IS the decisions file (the earlier plan draft's gate produced it; do not create a second source of truth).
 
-- [ ] **Step 1: Hallmark redesign preview gate (controller, not a subagent)**
+- [ ] **Step 1: Read the locked system**
 
-Run the `hallmark redesign` verb against the landing (`app/page.tsx` + `globals.css`) with the audit as context. The preview MUST (audit constraints): kill the centered-hero template (asymmetric, left-biased), introduce a display+body **pairing** (self-hosted via `next/font/google`), flat tinted paper (no body gradient), preserve the existing teal accent family as anchor (pre-flight rule: preserve palette), preserve the e2e landmarks (see Global Constraints). Emit the preview block; **STOP and get user approval of the preview** before Step 2. Record the approved picks (macrostructure, theme tokens with OKLCH values, font pair, nav archetype, footer archetype) in `docs/redesign-decisions.md`.
+Run: `cat design.md`
+Expected: the full system (genre modern-minimal · macrostructure families · Cobalt-teal theme tokens · typography · motion · microinteractions · CTA voice · stamps). **This file is the spec for everything below — no preview gate remains; it was confirmed 2026-10-08.** If any Step below conflicts with `design.md`, stop and report DONE_WITH_CONCERNS naming the conflict (design.md wins per Global Constraints).
 
-- [ ] **Step 2: Write `tokens.css` from the approved decisions**
+- [ ] **Step 2: Write `apps/web/tokens.css` from `design.md`**
 
-Every value comes from `redesign-decisions.md` — the full token list from Interfaces. Example skeleton (values = the approved decisions):
+Copy the `### tokens.css (canonical)` block from `design.md` verbatim into a new `apps/web/tokens.css`, then append the three runtime tokens from the Interfaces block (`--focus-ring`, `--shadow-lift`, `--dur-reveal` if absent). First line comment:
 
 ```css
-/* Hallmark · macrostructure: <approved name> · tone: <approved tone> · anchor hue: teal (preserved) */
-:root {
-  --color-paper: <oklch from decisions>;      /* flat — replaces body gradient */
-  --color-surface: <oklch>;
-  --color-ink: <oklch>;
-  --color-ink-soft: <oklch>;
-  --color-accent: #0b6f8f;                    /* preserved teal family */
-  --color-accent-strong: #08556e;
-  --color-accent-soft: <tint>;
-  --color-danger: <red oklch>;                /* THE only red (audit #15) */
-  --color-border: <oklch>;
-  --font-display: var(--font-display-local);
-  --font-body: var(--font-body-local);
-  --space-1: 4px;  --space-2: 8px;  --space-3: 12px;  --space-4: 16px;
-  --space-5: 24px; --space-6: 32px; --space-7: 48px; --space-8: 64px;
-  --text-display: clamp(2.4rem, 5.5vw, 4rem);
-  --text-2xl: clamp(1.6rem, 3vw, 2.2rem);
-  --text-xl: 1.4rem; --text-lg: 1.15rem; --text-base: 1rem; --text-sm: 0.875rem;
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --dur-fast: 120ms; --dur-base: 200ms;
-  --radius: 14px;
-  --shadow: 0 10px 30px rgba(16, 32, 46, 0.08);
-}
+/* Hallmark · genre: modern-minimal · macrostructure: app chrome (Workbench family) · design-system: design.md · designed-as-app */
 ```
 
 - [ ] **Step 3: Wire fonts + tokens in `layout.tsx`**
 
 ```tsx
-import { <DisplayFont>, <BodyFont> } from "next/font/google";
+import { Space_Grotesk, Inter, JetBrains_Mono } from "next/font/google";
 import "./tokens.css";
 import "./globals.css";
 
-const display = <DisplayFont>({ subsets: ["latin"], variable: "--font-display-local", display: "swap" });
-const body = <BodyFont>({ subsets: ["latin"], variable: "--font-body-local", display: "swap" });
+const display = Space_Grotesk({ subsets: ["latin"], variable: "--font-display-local", display: "swap", weight: ["500", "600"] });
+const body = Inter({ subsets: ["latin"], variable: "--font-body-local", display: "swap", weight: ["400", "500"] });
+const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono-local", display: "swap", weight: ["400", "500"] });
 
-// root layout: <body className={`${display.variable} ${body.variable}`}>
+// root layout <body>:
+//   className={`${display.variable} ${body.variable} ${mono.variable}`}
 ```
 
-(Exact font component names = the approved pairing from `redesign-decisions.md`.)
+- [ ] **Step 4: Migrate `globals.css` onto the system (in-place edit; no file deletions)**
 
-- [ ] **Step 4: Migrate base rules in `globals.css` (append-only — never remove the file's existing structure wholesale)**
-
-- `body`: `background: var(--color-paper)` (delete the `linear-gradient` at `:25`), `font-family: var(--font-body)`.
-- Headings (`.hero h1`, `.auth__card h1`, add a generic `h1, h2, h3`): `font-family: var(--font-display)`, `font-style: normal` (roman, never italic).
-- `.button`: `transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);` (kills browser `ease`, audit #9); add
+1. **Kill the legacy token block and legacy names.** Delete the old `:root` (`globals.css:1-12` — `--bg/--surface/--ink/--accent/...`) and mechanically rename every reference in the file to the `design.md` names: `var(--bg)` → `var(--color-paper)`, `var(--surface)` → `var(--color-paper-2)`, `var(--ink)` → `var(--color-ink)`, `var(--ink-soft)` → `var(--color-ink-soft)`, `var(--accent)` → `var(--color-accent)`, `var(--accent-strong)` → `var(--color-accent-strong)`, `var(--accent-soft)` → `var(--color-accent-soft)`, `var(--border)` → `var(--color-rule)`, `var(--radius)` → `var(--radius-card)`. (JSX files also carry `var(--surface, #ffffff)`-style fallbacks — Task 5 removes those; here fix only `globals.css`.)
+2. `body { background: var(--color-paper); color: var(--color-ink-2); font-family: var(--font-body); }` — **delete the `linear-gradient`** at `:25` (audit #8). Never `#fff`/`#000` (design.md).
+3. Headings (`h1, h2, h3`, `.hero h1`, `.auth__card h1`): `font-family: var(--font-display); font-style: normal; letter-spacing: -0.02em;` (roman always).
+4. `.button` (audit #9 + design.md radii): `border-radius: var(--radius-control); transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);` (kills browser `ease` and the old 999px pills — Cobalt bans pill CTAs). Primary: `background: var(--color-accent); color: var(--color-accent-ink);` hover → `var(--color-accent-strong)`. Ghost: hairline `var(--color-rule-2)` border, ink text.
+5. Focus rings (audit #10, instant, never animated):
 
 ```css
 .button:focus-visible,
 a:focus-visible,
-[role="button"]:focus-visible {
+[role="button"]:focus-visible,
+input:focus-visible {
   outline: var(--focus-ring);
   outline-offset: 2px;
 }
 ```
 
-(fixes audit #10; instant, never animated). Swap raw hex for tokens: `#b3261e` → `var(--color-danger)` (`:324`), `#ffffff` in `.button--primary` → `var(--color-surface)` or a dedicated `--color-on-accent` token added to `tokens.css`. Delete dead `.preview__hint` (`:243-246`, audit #14).
+6. Dead CSS: delete `.preview__hint` (`:243-246`, audit #14). Migrate the two legacy reds (`#b3261e` `.auth__error`, plus any others) → `var(--color-danger)` (audit #15). Card surfaces: `.demo-card/.auth__card/.preview__slot` → `border: var(--rule); border-radius: var(--radius-card); box-shadow: none` (hairlines do the work — design.md signature 2), except a single `var(--shadow-lift)` allowed on `.demo-card`.
 
 - [ ] **Step 5: Run suites + build**
 
@@ -429,13 +412,17 @@ it("keeps every e2e landmark after the redesign", () => {
 Run: `cd apps/web && npx vitest run __tests__/landing.test.tsx`
 Expected: PASS (guards against regression during Step 3)
 
-- [ ] **Step 3: Restructure `page.tsx` + landing CSS per `redesign-decisions.md`**
+- [ ] **Step 3: Restructure `page.tsx` + landing CSS to the Workbench/Cobalt shape (`design.md`)**
 
-- Kill `.hero { text-align: center }` → left-biased grid (audit #1): headline column + actions/demo-card column per the approved macrostructure (exact layout = decisions doc; constraint: headline and CTA no longer centered, hero height = content height).
-- Headline uses `var(--font-display)` + `var(--text-display)`; ≤ 50 chars (current headline is 22 — keep).
-- Eyebrow pill (`.hero__eyebrow`) only if the approved macrostructure calls for it — the audit flags badge-pills as template furniture; drop if the decisions doc doesn't mandate it.
-- Footer: adopts the approved footer archetype (closes the page — no centered sitemap echo).
-- All values via tokens (no new hex).
+New landing structure, in DOM order (all values via tokens; no new hex):
+
+1. **Bordered nav** (design.md nav): flush full-width, `border-bottom: var(--rule)`, wordmark left (`--font-display`, 600) + text links; right side = GitHub link + **Log in** as the one solid accent button (`--radius-control`). No floating pill, no `⌘K` (known omission).
+2. **Hero — two-column, title LEFT / proof RIGHT** (genre-canonical, kills audit #1's centering): left = `<h1>` "Geo-RAG Earth Dashboard" (`var(--font-display)`, `var(--text-display)`, ≤50 chars — current is fine) + lede (the existing pitch, kept) + actions (solid "Get started" → `/login`, typographic "Log in" secondary); right = the **demo-access card** (keeps `data-testid="demo-access-card"` + exact creds + "Public sandbox with sample data" copy). `.hero { text-align: center }` and the `.hero__eyebrow` pill are deleted (template furniture — audit #1).
+3. **Workbench band**: the walkthrough GIF in a hairline-framed full-width figure — this is the hero *proof* (keeps `data-testid="gif-slot"`, `src="/demo.gif"`, width/height attrs).
+4. **One dark graphite band** (design.md signature 8): "How it works" — 3 numbered steps (describe in plain words → ranked by score 0–1 → click for details/imagery/location) + the what-you-get line (score = semantic match, date = satellite capture) on `--color-graphite` with `--color-graphite-ink` text, mono uppercase step labels. This is audit #3's explainer absorbed into the landing design (the dashboard's `FirstRunGuide` from Task 1 keeps its in-app copy — they reinforce, not conflict).
+5. **Ft2 footer**: single inline line — wordmark · one tagline phrase · GitHub link — `border-top: var(--rule)`, `--color-ink-soft`, `--text-sm` (replaces the centered footer, audit #1).
+
+All landmarks preserved per Global Constraints; every element token-styled.
 
 - [ ] **Step 4: Run tests + build**
 
@@ -508,7 +495,7 @@ Expected: FAIL — `aria-pressed` still present on rows; raw hex found in `dashb
 
 - [ ] **Step 3: Implement**
 
-- `ResultsPanel.tsx`: row → `className="results-row"` **plus `data-testid="result-row"`** (Task 10's e2e selects it — this is where that testid is added); `aria-current={selected ? "true" : undefined}` (drop `aria-pressed`); selected styling moves to CSS: `.results-row[aria-current="true"] { background: var(--color-accent); color: var(--color-on-accent, #fff); }`; `.results-row { font-variant-numeric: tabular-nums; }`; borders/background all token-based; delete the dead `results.length === 0` placeholder branch (`:23-25` — page never mounts it empty; audit noted it).
+- `ResultsPanel.tsx`: row → `className="results-row"` **plus `data-testid="result-row"`** (Task 10's e2e selects it — this is where that testid is added); `aria-current={selected ? "true" : undefined}` (drop `aria-pressed`); selected styling per design.md (`accent-soft` is the selected-row tint): `.results-row { font-variant-numeric: tabular-nums; font-family: var(--font-mono); } .results-row[aria-current="true"] { background: var(--color-accent-soft); color: var(--color-ink); border-color: var(--color-accent); }`; score/date values in `var(--font-mono)`; hairline borders `1px solid var(--color-rule)`, radius `var(--radius-control)`; delete the dead `results.length === 0` placeholder branch (`:23-25` — page never mounts it empty; audit noted it).
 - `dashboard/page.tsx`: replace inline `style={{…}}` with classes `.dashboard`, `.dash-row`, `.dash-alert`, `.dash-status`; error color → `var(--color-danger)` (kills `#b91c1c`).
 - `EmptyState.tsx` / `BboxDraw.tsx`: dashed borders → `1px solid var(--color-border)` (audit #11); fallback-hex vars (`var(--surface, #ffffff)`) → plain `var(--color-surface)`.
 - `globals.css` append: the `.results-row`, `.guide` (Task 1 may have added minimal styles — harmonize), `.dash-*` rules with tokens only.
@@ -1084,3 +1071,7 @@ Verify: `curl -sI https://geo.sumbono.dev/` (headers intact), landing 200 with n
 4. **Review Focus:** all five lines have owning tests — polygon validation matrix (T8 Step 1), guide visibility lifecycle (T1 Step 1 page tests), landmark preservation (T4 Step 1 + full Playwright T10), hover/popup cleanup (T9 Step 1 + existing unmount tests), polygon e2e race (T10 Step 1 wait + T7 deterministic unit tests).
 
 **Triple-pass verification (2026-10-08) applied:** fixed 5 Pass-2 defects before execution — T8's `seeded_tiles` dict-iteration bug (compare `str(seeded_tiles["coral"].id)` directly), T8's malformed parametrize row removed + standalone `bad_shape` test, T5's color-scan extended to `rgb()/rgba(`, T10's login steps changed to reuse the spec's proven block, T7's double-click-close sentence made unambiguous (second rapid click = close, never append).
+
+**Harness-adversarial pass (2026-10-08) applied:** fixed 4 more — user-event imports → `fireEvent` (package never installed), `login` fixture → explicit `login(client)` calls, `result-row` testid ownership pinned to T5, fetch mocking → `vi.stubGlobal` harness; plus rect/polygon precedence clause.
+
+**Design gate resolved (2026-10-08):** user confirmed the multi-page design system; `design.md` written at repo root (modern-minimal · Cobalt-teal · Workbench families · Space Grotesk/Inter/JetBrains Mono · bordered nav · Ft2 footer · ⌘K deferred). Tasks 3–5 rewritten to consume it directly — no open decisions remain in this plan.
