@@ -487,13 +487,16 @@ it("row score+date container carries tabular-nums (audit #12)", () => {
   // the class is the token-migrated container; css assertion lives in the snapshot of globals.css scan below
 });
 
-it("no raw palette hex remains in dashboard components (audit #7)", async () => {
+it("no raw palette colors remain in dashboard components (audit #7)", async () => {
   const fs = await import("node:fs/promises");
   const files = ["app/dashboard/page.tsx", "components/ResultsPanel.tsx", "components/EmptyState.tsx", "components/BboxDraw.tsx"];
   for (const file of files) {
     const src = await fs.readFile(new URL(`../${file}`, import.meta.url), "utf8");
-    const hexes = src.match(/#[0-9a-fA-F]{3,8}\b/g) ?? [];
-    expect(hexes, `${file} contains raw hex: ${hexes}`).toEqual([]);
+    const raw = [
+      ...(src.match(/#[0-9a-fA-F]{3,8}\b/g) ?? []),
+      ...(src.match(/rgba?\([^)]*\)/g) ?? []),  // rgba() counts as raw color too
+    ];
+    expect(raw, `${file} contains raw colors: ${raw}`).toEqual([]);
   }
 });
 ```
@@ -691,7 +694,7 @@ Expected: FAIL — `polygonMode` / `onTogglePolygon` / `onPolygon` props do not 
 
 `BboxDraw.tsx` — new state `vertices: [number, number][]` (reset on arm/disarm/Esc/after send). New props: `polygonMode: boolean`, `onTogglePolygon: () => void`, `onPolygon: (polygon: [number, number][]) => void`. Routing: when `polygonMode` and `active`-equivalent flag is on, `handleMapClick` appends to `vertices` (cap 64 — silently ignore beyond, status strip says `64 vertex cap`) instead of the rect machine; `runPolygon(polygon)` posts `/search/polygon` via `apiFetch`, calls `onResults` + disarms via `onTogglePolygon()`. Keydown: Enter closes (≥3), Esc clears `vertices`. UI: second ghost toggle button `aria-pressed={polygonMode}` labeled `Draw polygon`, mutually exclusive with `Draw area` (arming one calls the other's off-handler via the page). Status strip mirrors the rect variant with vertex count.
 
-`Map.tsx`: `setPolygon(coords: [number,number][] | null)` on `MapHandle` — GeoJSON LineString (auto-close ring on render) in layer `draw-polygon`, solid accent line + 15% fill; cleared on null. Map double-click closes the polygon: map emits double-click as two rapid clicks — **suppress the duplicate vertex** by ignoring a click within 250 ms and <1e-6° of the previous vertex when `vertices.length >= 3`, then treat it as close (this implements "double-click closes" without a second event type).
+`Map.tsx`: `setPolygon(coords: [number,number][] | null)` on `MapHandle` — GeoJSON LineString (auto-close ring on render) in layer `draw-polygon`, solid accent line + 15% fill; cleared on null. Map double-click closes the polygon, implemented over two rapid click events: when a click arrives **within 250 ms of the previous click AND within 1e-6° of the last vertex AND `vertices.length >= 3`**, do **not** append it — treat that second click as the close gesture (same path as Enter) and send the polygon. The first click of the pair appended normally. This implements "double-click closes" without a second event type.
 
 `dashboard/page.tsx`: `drawShape: "rect" | "polygon" | null` state replaces the boolean (arming one clears the other + clears preview/polygon layers); wires `onPolygon` to draw the finalized shape.
 
@@ -739,7 +742,6 @@ def test_polygon_requires_auth(create_client):
     ([[39.0, 21.0], [39.1, 21.0]], "fewer than 3 points"),
     ([[39.0, 21.0], [39.1, 21.0], [39.2, 21.0]], "collinear zero area"),
     ([[181.0, 21.0], [181.1, 21.0], [181.05, 21.1]], "out of bounds"),
-    ([[[39.0, 21.0]] * 3][0] + [], "malformed"),  # placeholder replaced below
 ])
 def test_polygon_validation_422(create_client, login, polygon, reason):
     assert create_client.post("/search/polygon", json={"polygon": polygon}).status_code == 422, reason
@@ -763,13 +765,17 @@ def test_polygon_with_q_ranks_within_filter(create_client, login, seeded_tiles):
     assert r.status_code == 200
     results = r.json()["results"]
     assert 0 < len(results) <= 12
-    coral = next(x for x in seeded_tiles if x["id"] == str(seeded_tiles["coral"].id))
-    assert results[0]["id"] == coral["id"]
+    # seeded_tiles is a dict {coral: Tile, ...} — index it, never iterate rows off it
+    assert results[0]["id"] == str(seeded_tiles["coral"].id)
     scores = [row["score"] for row in results]
     assert scores == sorted(scores, reverse=True)
+
+def test_non_point_entries_422(create_client, login):
+    bad_shape = {"polygon": [[39.0, 21.0], [39.1, 21.0], "not-a-point"]}
+    assert create_client.post("/search/polygon", json=bad_shape).status_code == 422
 ```
 
-*(The malformed-entry parametrize row is written as a plain `bad_shape` fixture instead: `{"polygon": [[39.0, 21.0], [39.1, 21.0], "not-a-point"]}` → 422 — implement the test file with that as its own test, not a parametrize placeholder.)*
+*(The `parametrize` in `test_polygon_validation_422` carries exactly the three valid rows shown — collinear, out-of-bounds, <3 points — plus this standalone `bad_shape` test. No placeholder rows.)*
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -966,31 +972,23 @@ git commit -m "feat: cross-highlight, detail prev/next, single DOM-built map pop
 
 - [ ] **Step 1: Extend the e2e (fail first — new steps reference not-yet-tested UI, run against the current build to see the guidance assertions fail)**
 
-Append to `apps/web/e2e/dashboard.spec.ts` (mirror the file's existing wait/selector style):
+Append to `apps/web/e2e/dashboard.spec.ts`. **Reuse the spec file's existing proven login block verbatim** (the helper/steps the current `dashboard: login → search → …` test already uses — do not re-invent selectors like guessed button names; extract it into a local `async function login(page)` inside the spec if it isn't one already, and call it from all three tests). Then append:
 
 ```ts
 test("first-run guide and suggestion chips lead to results", async ({ page }) => {
-  await page.goto("/login");
-  await page.getByLabel(/username/i).fill("demo");
-  await page.getByLabel(/password/i).fill("demo-pass-123");
-  await page.getByRole("button", { name: /log in|sign in|submit/i }).click();
-  await page.waitForURL("**/dashboard");
+  await login(page);
   // Guide visible before any search (Review Focus #2)
   await expect(page.getByRole("heading", { name: /how this works/i })).toBeVisible();
-  // Chip → results (Review Focus satisfied: exactly one search POST)
+  // Chip → results (exactly one search POST)
   const searchPromise = page.waitForResponse((r) => r.url().includes("/api/search/vector") && r.request().method() === "POST");
   await page.getByRole("button", { name: "turquoise coastal water" }).first().click();
   await searchPromise;
   await expect(page.getByRole("heading", { name: /how this works/i })).toHaveCount(0);
-  await expect(page.getByTestId("result-row").first()).toBeVisible(); // rows carry data-testid="result-row" (added in Task 5 markup — see note)
+  await expect(page.getByTestId("result-row").first()).toBeVisible(); // data-testid added in Task 5 markup (see note)
 });
 
 test("polygon draw searches an area", async ({ page }) => {
-  await page.goto("/login");
-  await page.getByLabel(/username/i).fill("demo");
-  await page.getByLabel(/password/i).fill("demo-pass-123");
-  await page.getByRole("button", { name: /log in|sign in|submit/i }).click();
-  await page.waitForURL("**/dashboard");
+  await login(page);
   await page.getByRole("button", { name: "Draw polygon" }).click();
   await page.locator(".maplibregl-canvas").waitFor({ state: "visible" });
   await page.waitForTimeout(600); // style load — mirrors the bbox steps' wait (Review Focus #5)
@@ -1052,3 +1050,5 @@ Verify: `curl -sI https://geo.sumbono.dev/` (headers intact), landing 200 with n
 2. **Placeholder scan:** Task 8's parametrize row flagged and replaced inline with a concrete `bad_shape` test; font names deferred to the preview gate by design (controller gate, documented); no TBD/TODO/"similar to Task N".
 3. **Type consistency:** `onSuggest(query: string)` identical in Tasks 1/2 (page's `handleSuggest`); `SearchResult` untouched; `MapHandle` grows `setPreviewRectangle` (T6) then `setPolygon` (T7) — both additive; `BboxDrawHandle.handleMapClick` unchanged signature across T6/T7; `onHover`/`onNavigate` defined only in Task 9 and consumed there.
 4. **Review Focus:** all five lines have owning tests — polygon validation matrix (T8 Step 1), guide visibility lifecycle (T1 Step 1 page tests), landmark preservation (T4 Step 1 + full Playwright T10), hover/popup cleanup (T9 Step 1 + existing unmount tests), polygon e2e race (T10 Step 1 wait + T7 deterministic unit tests).
+
+**Triple-pass verification (2026-10-08) applied:** fixed 5 Pass-2 defects before execution — T8's `seeded_tiles` dict-iteration bug (compare `str(seeded_tiles["coral"].id)` directly), T8's malformed parametrize row removed + standalone `bad_shape` test, T5's color-scan extended to `rgb()/rgba(`, T10's login steps changed to reuse the spec's proven block, T7's double-click-close sentence made unambiguous (second rapid click = close, never append).
