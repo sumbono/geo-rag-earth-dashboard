@@ -17,10 +17,15 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
-      <body className={`${display.variable} ${body.variable} ${mono.variable}`}>
-        {children}
-      </body>
+    <html
+      lang="en"
+      className={`${display.variable} ${body.variable} ${mono.variable}`}
+    >
+      {/* vars MUST sit on <html>: tokens.css declares its :root font aliases
+          with var(--font-*-local), and substitution happens per-element at
+          computed-value time — on <body> the :root aliases resolve invalid
+          (Ruling R-3b). */}
+      <body>{children}</body>
     </html>
   );
 }
