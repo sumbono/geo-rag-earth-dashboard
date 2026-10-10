@@ -260,7 +260,9 @@ export default function DashboardPage() {
               onHover={setHoveredId}
             />
           ) : searched ? (
-            <EmptyState onSuggest={handleSuggest} />
+            // Issue 8: gate on `loading` so a first (or repeat) search in
+            // flight never flashes EmptyState before the response lands.
+            loading ? null : <EmptyState onSuggest={handleSuggest} />
           ) : (
             <FirstRunGuide visible onSuggest={handleSuggest} />
           )}

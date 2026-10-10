@@ -124,6 +124,7 @@ export default function DetailPanel({
           <button
             ref={prevButtonRef}
             type="button"
+            className="chip"
             aria-label="Previous result"
             // With fewer than 2 hits there is nothing to cycle — the page
             // would silently no-op, so say so for assistive tech (fix R1m).
@@ -136,6 +137,7 @@ export default function DetailPanel({
           <button
             ref={nextButtonRef}
             type="button"
+            className="chip"
             aria-label="Next result"
             disabled={chartResults.length < 2}
             onClick={() => onNavigate?.(1)}
@@ -146,6 +148,7 @@ export default function DetailPanel({
         </div>
         <button
           type="button"
+          className="chip"
           aria-label="Close"
           onClick={onClose}
           style={{
@@ -189,6 +192,7 @@ export default function DetailPanel({
           >
             <button
               type="button"
+              className="chip"
               aria-pressed={!falseColor}
               onClick={() => setFalseColor(false)}
               style={{
@@ -204,6 +208,7 @@ export default function DetailPanel({
             </button>
             <button
               type="button"
+              className="chip"
               aria-pressed={falseColor}
               onClick={() => setFalseColor(true)}
               style={{

@@ -51,9 +51,16 @@ const POLYGON_LINE_LAYER = "draw-polygon";
  * Brand accent as a paint literal (finding 17): maplibre paint properties
  * cannot resolve CSS custom properties, so the dashed draw-preview layer
  * takes this named constant instead of a scattered magic literal. Mirrors
- * `--color-accent` in `tokens.css`; Task 7's `draw-polygon` layer reuses it.
+ * `--color-accent` in `tokens.css`; Task 7's `draw-polygon` layer and the
+ * drawn search rectangle reuse it so every draw tool paints the same teal.
  */
 const ACCENT_HEX = "#0b6f8f";
+/** Marker outline (paper white ring around result dots). */
+const MARKER_STROKE_HEX = "#ffffff";
+/** Score ramp stops — low → high (data-viz scale, not brand accent). */
+const SCORE_LOW_HEX = "#2563eb";
+const SCORE_MID_HEX = "#38bdf8";
+const SCORE_HIGH_HEX = "#facc15";
 
 const EMPTY_FC: FeatureCollection = {
   type: "FeatureCollection",
@@ -112,13 +119,13 @@ const style: StyleSpecification = {
       id: RECTANGLE_FILL_LAYER,
       type: "fill",
       source: RECTANGLE_SOURCE,
-      paint: { "fill-color": "#2563eb", "fill-opacity": 0.22 },
+      paint: { "fill-color": ACCENT_HEX, "fill-opacity": 0.22 },
     },
     {
       id: RECTANGLE_LINE_LAYER,
       type: "line",
       source: RECTANGLE_SOURCE,
-      paint: { "line-color": "#2563eb", "line-width": 2 },
+      paint: { "line-color": ACCENT_HEX, "line-width": 2 },
     },
     {
       // Dashed live preview of the in-progress box (Task 6, R-6a): from
@@ -186,7 +193,7 @@ const style: StyleSpecification = {
           7,
         ],
         "circle-stroke-width": 1.5,
-        "circle-stroke-color": "#ffffff",
+        "circle-stroke-color": MARKER_STROKE_HEX,
         // Score ramp: low score = deep blue → high score = yellow.
         "circle-color": [
           "case",
@@ -197,11 +204,11 @@ const style: StyleSpecification = {
             ["linear"],
             ["get", "score"],
             0,
-            "#2563eb",
+            SCORE_LOW_HEX,
             0.5,
-            "#38bdf8",
+            SCORE_MID_HEX,
             1,
-            "#facc15",
+            SCORE_HIGH_HEX,
           ],
         ],
       },

@@ -199,7 +199,8 @@ def search_polygon(
     """Tiles intersecting a client-drawn ring, optionally cosine-ranked by `q`.
 
     The ring is validated here (3–64 finite in-bounds points, non-zero
-    shoelace area; a duplicate closing vertex is normalized away), closed,
+    shoelace area; a duplicate closing vertex is normalized away; GEOS
+    ST_IsValid rejects self-intersecting bow-ties with 422), closed,
     and handed to PostGIS as WKT. Without `q` there is no similarity to score,
     so `score` is 0.0 for every row — identical to /search/bbox no-q mode.
     Results cap at 12 regardless of the requested limit (Global Constraint).
@@ -211,6 +212,11 @@ def search_polygon(
         + f", {ring[0][0]} {ring[0][1]}))"  # closed
     )
     poly = func.ST_GeomFromText(wkt, 4326)  # func pattern — no geoalchemy2 symbol imports (finding 19)
+    # Bow-tie / self-intersecting rings have non-zero shoelace area but fail
+    # GEOS validity; reject 422 before ST_Intersects (which can 500 or silently
+    # accept on some builds). ST_IsValid is the GEOS check — no shapely dep.
+    if not session.execute(select(func.ST_IsValid(poly))).scalar():
+        raise HTTPException(status_code=422, detail="polygon is self-intersecting")
     spatial = func.ST_Intersects(Tile.bbox, poly)
     limit = min(payload.limit, 12)  # Global Constraint: LIMIT 12
     cols = (

@@ -60,6 +60,21 @@ it("Esc clears vertices without sending", () => {
   expect(onPolygon).not.toHaveBeenCalled();
 });
 
+it("Enter from an INPUT target does not close the polygon (form-field guard)", () => {
+  const { ref, onPolygon } = setup();
+  ref.current!.handleMapClick([39.0, 21.0]);
+  ref.current!.handleMapClick([39.1, 21.0]);
+  ref.current!.handleMapClick([39.05, 21.1]);
+  // Keydown originates in a form field (the search box) — same shape as a
+  // real Enter-while-typing; it must not run the polygon close path.
+  const input = document.createElement("input");
+  document.body.appendChild(input);
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(onPolygon).not.toHaveBeenCalled();
+  expect(fetchMock).not.toHaveBeenCalled();
+  input.remove();
+});
+
 it("double-click near the last vertex closes (no duplicate vertex appended)", () => {
   const { ref, onPolygon } = setup();
   // Controlled clock (R-7a): the close gesture's <250ms window must not

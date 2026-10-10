@@ -215,6 +215,9 @@ h3 {
 
 /* focus rings — instant, never animated (audit #10) */
 .button:focus-visible,
+button:focus-visible,
+.chip:focus-visible,
+.results-row:focus-visible,
 a:focus-visible,
 [role="button"]:focus-visible,
 input:focus-visible {

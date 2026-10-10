@@ -218,16 +218,19 @@ describe("empty state", () => {
 
     // Scope to the empty-state region: the SearchBar renders the same
     // example chips unconditionally, so the page has two of each name.
-    const empty = () =>
-      within(screen.getByRole("region", { name: "No results" }));
+    // Issue 8: the region mounts only after the response lands (no flash
+    // during the in-flight search), so wait for it rather than sync-query.
+    const empty = within(
+      await screen.findByRole("region", { name: "No results" }),
+    );
     expect(
-      await empty().findByRole("button", { name: "turquoise coastal water" }),
+      await empty.findByRole("button", { name: "turquoise coastal water" }),
     ).toBeInTheDocument();
     expect(
-      empty().getByRole("button", { name: "desert near shoreline" }),
+      empty.getByRole("button", { name: "desert near shoreline" }),
     ).toBeInTheDocument();
     expect(
-      empty().getByRole("button", { name: "cloud patterns" }),
+      empty.getByRole("button", { name: "cloud patterns" }),
     ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -239,8 +242,9 @@ describe("empty state", () => {
     submitQuery("water");
     // Two buttons carry this name (SearchBar chip + EmptyState copy), so
     // pin the click to the suggestion inside the no-results region.
+    // Issue 8: the region mounts after the response, not at submit.
     const suggestion = await within(
-      screen.getByRole("region", { name: "No results" }),
+      await screen.findByRole("region", { name: "No results" }),
     ).findByRole("button", { name: "cloud patterns" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
@@ -261,8 +265,9 @@ describe("empty state", () => {
 
     submitQuery("water");
     // Scope to the empty-state region — the SearchBar chip shares the name.
+    // Issue 8: the region mounts after the response, not at submit.
     const suggestion = await within(
-      screen.getByRole("region", { name: "No results" }),
+      await screen.findByRole("region", { name: "No results" }),
     ).findByRole("button", { name: "turquoise coastal water" });
     fireEvent.click(suggestion);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));

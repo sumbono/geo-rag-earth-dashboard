@@ -78,3 +78,15 @@ def test_non_point_entries_422(create_client):
     login(create_client)
     bad_shape = {"polygon": [[39.0, 21.0], [39.1, 21.0], "not-a-point"]}
     assert create_client.post("/search/polygon", json=bad_shape).status_code == 422
+
+def test_self_intersecting_bowtie_422(create_client):
+    # Asymmetric bow-tie (hourglass): the two diagonals cross, so the ring is
+    # self-intersecting. Shoelace area is non-zero (area=5.0 — passes the
+    # zero-area check), but GEOS/ST_IsValid rejects it — must be a 422 that
+    # names self-intersection, never a 200, a 500, or the zero-area sibling.
+    login(create_client)
+    bowtie = [[39.0, 21.0], [44.0, 23.0], [44.0, 21.0], [39.0, 25.0]]
+    r = create_client.post("/search/polygon", json={"polygon": bowtie})
+    assert r.status_code == 422
+    detail = str(r.json().get("detail", "")).lower()
+    assert "self-intersect" in detail, detail

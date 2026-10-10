@@ -120,6 +120,18 @@ export default function BboxDraw({
   useEffect(() => {
     if (!active) return;
     function onKeyDown(event: KeyboardEvent) {
+      // Skip while typing in a field so Enter in the search box submits the
+      // search only — never closes the in-progress polygon (DetailPanel's
+      // target-guard idiom).
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
       if (event.key === "Enter") {
         const verts = verticesRef.current;
         if (polygonMode && verts.length >= 3) void runPolygonRef.current(verts);

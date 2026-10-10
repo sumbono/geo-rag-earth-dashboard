@@ -212,6 +212,56 @@ describe("dashboard search UI", () => {
         .findByRole("button", { name: "turquoise coastal water" }),
     ).toBeInTheDocument();
   });
+
+  it("hides EmptyState while the first search is in flight, then shows it after an empty response", async () => {
+    // Deferred response: hold the search open so we can inspect the UI mid-flight.
+    let resolveSearch!: (value: Response) => void;
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveSearch = resolve;
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<DashboardPage />);
+
+    // First visit: guide, never EmptyState.
+    expect(
+      screen.getByRole("heading", { name: /how this works/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("region", { name: "No results" }),
+    ).not.toBeInTheDocument();
+
+    submitQuery("water");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    // In flight: `searched` is already true but `results` is still empty —
+    // must not flash EmptyState (or the first-run guide) before the response.
+    expect(screen.getByRole("status")).toHaveTextContent(/searching/i);
+    expect(
+      screen.queryByRole("region", { name: "No results" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: /how this works/i }),
+    ).not.toBeInTheDocument();
+
+    resolveSearch(
+      new Response(JSON.stringify({ results: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    // Completed empty response → EmptyState, not the guide.
+    expect(
+      await screen.findByRole("region", { name: "No results" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: /how this works/i }),
+    ).not.toBeInTheDocument();
+  });
 });
 
 describe("map", () => {
