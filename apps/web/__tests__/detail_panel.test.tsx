@@ -5,7 +5,13 @@
  * search_ui.test.tsx) — the dashboard page under test renders the real Map
  * component against the mock.
  */
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import DashboardPage from "../app/dashboard/page";
 import DetailPanel from "../components/DetailPanel";
@@ -16,7 +22,9 @@ const hoisted = vi.hoisted(() => {
   class MockPopup {
     setLngLat = vi.fn((): any => this);
     setHTML = vi.fn((): any => this);
+    setDOMContent = vi.fn((): any => this);
     addTo = vi.fn((): any => this);
+    remove = vi.fn();
   }
 
   class MockMap {
@@ -203,21 +211,26 @@ describe("empty state", () => {
     stubFetch(200, { results: [] });
     render(<DashboardPage />);
 
-    // First visit: no search has run, so no empty state.
-    expect(
-      screen.queryByRole("button", { name: "turquoise coastal water" }),
-    ).not.toBeInTheDocument();
+    // First visit: no search has run, so no empty state (guide chips may show).
+    expect(screen.queryByText("No results")).not.toBeInTheDocument();
 
     submitQuery("water");
 
+    // Scope to the empty-state region: the SearchBar renders the same
+    // example chips unconditionally, so the page has two of each name.
+    // Issue 8: the region mounts only after the response lands (no flash
+    // during the in-flight search), so wait for it rather than sync-query.
+    const empty = within(
+      await screen.findByRole("region", { name: "No results" }),
+    );
     expect(
-      await screen.findByRole("button", { name: "turquoise coastal water" }),
+      await empty.findByRole("button", { name: "turquoise coastal water" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "desert near shoreline" }),
+      empty.getByRole("button", { name: "desert near shoreline" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "cloud patterns" }),
+      empty.getByRole("button", { name: "cloud patterns" }),
     ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -227,9 +240,12 @@ describe("empty state", () => {
     render(<DashboardPage />);
 
     submitQuery("water");
-    const suggestion = await screen.findByRole("button", {
-      name: "cloud patterns",
-    });
+    // Two buttons carry this name (SearchBar chip + EmptyState copy), so
+    // pin the click to the suggestion inside the no-results region.
+    // Issue 8: the region mounts after the response, not at submit.
+    const suggestion = await within(
+      await screen.findByRole("region", { name: "No results" }),
+    ).findByRole("button", { name: "cloud patterns" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     fireEvent.click(suggestion);
@@ -248,9 +264,11 @@ describe("empty state", () => {
     render(<DashboardPage />);
 
     submitQuery("water");
-    const suggestion = await screen.findByRole("button", {
-      name: "turquoise coastal water",
-    });
+    // Scope to the empty-state region — the SearchBar chip shares the name.
+    // Issue 8: the region mounts after the response, not at submit.
+    const suggestion = await within(
+      await screen.findByRole("region", { name: "No results" }),
+    ).findByRole("button", { name: "turquoise coastal water" });
     fireEvent.click(suggestion);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
 

@@ -19,10 +19,12 @@ const WIDTH = 640;
 const HEIGHT = 260;
 const MARGIN = { top: 16, right: 16, bottom: 28, left: 52 };
 
-const LINE_STROKE = "#0b6f8f"; // var(--accent)
-const GRID_STROKE = "#e1e8ee";
-const AXIS_STROKE = "#d7e0e8";
-const LABEL_FILL = "#4a5b6a";
+// Design tokens, not literals (audit #7) — applied via `style` because SVG
+// presentation attributes don't reliably resolve var() across browsers.
+const LINE_STROKE = "var(--color-accent)"; // the teal signal (design.md)
+const GRID_STROKE = "var(--color-rule)";
+const AXIS_STROKE = "var(--color-rule-2)";
+const LABEL_FILL = "var(--color-ink-soft)";
 
 /** Always-UTC tick label ("06 Oct 14:00") regardless of the host timezone. */
 const X_TICK_FORMAT = utcFormat("%d %b %H:%M");
@@ -153,7 +155,7 @@ export default function TelemetryChart() {
       </div>
 
       {error !== null && (
-        <p role="alert" style={{ margin: 0, color: "#b91c1c" }}>
+        <p role="alert" className="dash-alert">
           {error}
         </p>
       )}
@@ -186,7 +188,7 @@ export default function TelemetryChart() {
                 x2={WIDTH - MARGIN.right}
                 y1={tick.y}
                 y2={tick.y}
-                stroke={GRID_STROKE}
+                style={{ stroke: GRID_STROKE }}
                 strokeWidth={1}
               />
               <text
@@ -195,7 +197,7 @@ export default function TelemetryChart() {
                 textAnchor="end"
                 dominantBaseline="middle"
                 fontSize={10}
-                fill={LABEL_FILL}
+                style={{ fill: LABEL_FILL }}
               >
                 {tick.label}
               </text>
@@ -207,7 +209,7 @@ export default function TelemetryChart() {
             x2={WIDTH - MARGIN.right}
             y1={HEIGHT - MARGIN.bottom}
             y2={HEIGHT - MARGIN.bottom}
-            stroke={AXIS_STROKE}
+            style={{ stroke: AXIS_STROKE }}
             strokeWidth={1}
           />
           {chart.xTickLabels.map((tick) => (
@@ -217,7 +219,7 @@ export default function TelemetryChart() {
               y={HEIGHT - MARGIN.bottom + 14}
               textAnchor="middle"
               fontSize={10}
-              fill={LABEL_FILL}
+              style={{ fill: LABEL_FILL }}
             >
               {tick.label}
             </text>
@@ -226,7 +228,7 @@ export default function TelemetryChart() {
             className="telemetry-chart__line"
             d={chart.path}
             fill="none"
-            stroke={LINE_STROKE}
+            style={{ stroke: LINE_STROKE }}
             strokeWidth={2}
           />
         </svg>

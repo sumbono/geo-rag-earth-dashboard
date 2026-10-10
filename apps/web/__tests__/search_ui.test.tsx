@@ -5,7 +5,14 @@
  * itself is wrapped (not replaced) so the real component runs against the
  * mock and every `results` prop it receives is recorded for assertions.
  */
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import DashboardPage from "../app/dashboard/page";
 import type { SearchResult } from "../lib/types";
@@ -22,7 +29,9 @@ const hoisted = vi.hoisted(() => {
     }
     setLngLat = vi.fn((): any => this);
     setHTML = vi.fn((): any => this);
+    setDOMContent = vi.fn((): any => this);
     addTo = vi.fn((): any => this);
+    remove = vi.fn();
   }
 
   class MockMap {
@@ -197,9 +206,65 @@ describe("dashboard search UI", () => {
 
     submitQuery("water");
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    // Scope to the empty-state region: the SearchBar chip shares the name.
+    // Issue 8 mounts it after the response, so await the region (findByRole)
+    // rather than sync-querying at fetch-call time.
+    const empty = within(
+      await screen.findByRole("region", { name: "No results" }),
+    );
     expect(
-      await screen.findByRole("button", { name: "turquoise coastal water" }),
+      await empty.findByRole("button", { name: "turquoise coastal water" }),
     ).toBeInTheDocument();
+  });
+
+  it("hides EmptyState while the first search is in flight, then shows it after an empty response", async () => {
+    // Deferred response: hold the search open so we can inspect the UI mid-flight.
+    let resolveSearch!: (value: Response) => void;
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveSearch = resolve;
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<DashboardPage />);
+
+    // First visit: guide, never EmptyState.
+    expect(
+      screen.getByRole("heading", { name: /how this works/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("region", { name: "No results" }),
+    ).not.toBeInTheDocument();
+
+    submitQuery("water");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    // In flight: `searched` is already true but `results` is still empty —
+    // must not flash EmptyState (or the first-run guide) before the response.
+    expect(screen.getByRole("status")).toHaveTextContent(/searching/i);
+    expect(
+      screen.queryByRole("region", { name: "No results" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: /how this works/i }),
+    ).not.toBeInTheDocument();
+
+    resolveSearch(
+      new Response(JSON.stringify({ results: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    // Completed empty response → EmptyState, not the guide.
+    expect(
+      await screen.findByRole("region", { name: "No results" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: /how this works/i }),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -310,13 +375,16 @@ describe("map", () => {
 
     const popup = hoisted.popups.at(-1);
     expect(popup.setLngLat).toHaveBeenCalledWith([38.05, 21.05]);
-    const html = popup.setHTML.mock.calls[0][0] as string;
-    expect(html).toContain("0.88");
-    expect(html).toContain("2024-05-01");
+    // Task 9: content is DOM-built (setDOMContent), never setHTML.
+    expect(popup.setHTML).not.toHaveBeenCalled();
+    const content = popup.setDOMContent.mock.calls[0][0] as HTMLElement;
+    expect(content.textContent).toContain("0.88");
+    expect(content.textContent).toContain("2024-05-01");
     expect(popup.addTo).toHaveBeenCalledWith(map);
 
+    // rows mark position in the list → aria-current, not aria-pressed (audit #13)
     expect(
       screen.getByRole("button", { name: /0\.88/ }),
-    ).toHaveAttribute("aria-pressed", "true");
+    ).toHaveAttribute("aria-current", "true");
   });
 });

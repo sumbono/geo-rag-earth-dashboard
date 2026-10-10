@@ -17,11 +17,14 @@ const ROW_HEIGHT = 22;
 const BAR_HEIGHT = 12;
 const MARGIN = { top: 8, right: 44, bottom: 24, left: 8 };
 
-const BAR_FILL = "#94a3b8";
-const BAR_FILL_SELECTED = "#0b6f8f"; // var(--accent)
-const GRID_STROKE = "#e1e8ee";
-const AXIS_STROKE = "#d7e0e8";
-const LABEL_FILL = "#4a5b6a";
+// Design tokens, not literals (audit #7) — applied via `style` because SVG
+// presentation attributes don't reliably resolve var() across browsers.
+const BAR_FILL = "var(--color-ink-soft)";
+const BAR_FILL_SELECTED = "var(--color-accent)"; // the teal signal (design.md)
+const GRID_STROKE = "var(--color-rule)";
+const AXIS_STROKE = "var(--color-rule-2)";
+const LABEL_FILL = "var(--color-ink-soft)";
+const VALUE_FILL = "var(--color-ink)";
 
 /** Neat tick label: "0.3", not "0.30000000000000004". */
 function tickLabel(tick: number): string {
@@ -68,7 +71,7 @@ export default function ScoreBarChart({
             x2={x(tick)}
             y1={MARGIN.top}
             y2={baselineY}
-            stroke={GRID_STROKE}
+            style={{ stroke: GRID_STROKE }}
             strokeWidth={1}
           />
           <text
@@ -76,7 +79,7 @@ export default function ScoreBarChart({
             y={baselineY + 14}
             textAnchor="middle"
             fontSize={10}
-            fill={LABEL_FILL}
+            style={{ fill: LABEL_FILL }}
           >
             {tickLabel(tick)}
           </text>
@@ -87,7 +90,7 @@ export default function ScoreBarChart({
         x2={WIDTH - MARGIN.right}
         y1={baselineY}
         y2={baselineY}
-        stroke={AXIS_STROKE}
+        style={{ stroke: AXIS_STROKE }}
         strokeWidth={1}
       />
 
@@ -108,7 +111,7 @@ export default function ScoreBarChart({
               width={barWidth}
               height={BAR_HEIGHT}
               rx={2}
-              fill={selected ? BAR_FILL_SELECTED : BAR_FILL}
+              style={{ fill: selected ? BAR_FILL_SELECTED : BAR_FILL }}
             >
               <title>{`${result.id}: ${result.score.toFixed(2)}`}</title>
             </rect>
@@ -118,7 +121,7 @@ export default function ScoreBarChart({
               y={y + BAR_HEIGHT / 2}
               dominantBaseline="middle"
               fontSize={11}
-              fill="#10202e"
+              style={{ fill: VALUE_FILL }}
             >
               {result.score.toFixed(2)}
             </text>

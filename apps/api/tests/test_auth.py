@@ -58,15 +58,15 @@ def test_login_rate_limited(limited_client):
 def test_protected_routes_reject_anonymous(create_client):
     # Plan matrix: every route except /auth/token and /auth/refresh is JWT-gated
     # — /auth/me and /auth/logout included (Task 16).
-    routes = ["/search/vector", "/search/bbox", "/telemetry/query",
+    routes = ["/search/vector", "/search/bbox", "/search/polygon", "/telemetry/query",
               "/telemetry/ingest", "/thumbs/00000000-0000-0000-0000-000000000000",
               "/auth/me", "/auth/logout"]
     for path in routes:
         # Dispatch on the path set: httpx's get() has no json kwarg (json=None
         # would TypeError) and bound-method identity (`m is obj.post`) is never
         # stable — so POSTs send an empty JSON body, GETs send none.
-        is_post = path in ("/search/vector", "/search/bbox", "/telemetry/ingest",
-                           "/auth/logout")
+        is_post = path in ("/search/vector", "/search/bbox", "/search/polygon",
+                           "/telemetry/ingest", "/auth/logout")
         method = create_client.post if is_post else create_client.get
         r = method(path, json={}) if is_post else method(path)
         assert r.status_code == 401, f"{path} not protected"
