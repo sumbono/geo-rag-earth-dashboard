@@ -207,9 +207,13 @@ describe("dashboard search UI", () => {
     submitQuery("water");
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     // Scope to the empty-state region: the SearchBar chip shares the name.
+    // Issue 8 mounts it after the response, so await the region (findByRole)
+    // rather than sync-querying at fetch-call time.
+    const empty = within(
+      await screen.findByRole("region", { name: "No results" }),
+    );
     expect(
-      await within(screen.getByRole("region", { name: "No results" }))
-        .findByRole("button", { name: "turquoise coastal water" }),
+      await empty.findByRole("button", { name: "turquoise coastal water" }),
     ).toBeInTheDocument();
   });
 

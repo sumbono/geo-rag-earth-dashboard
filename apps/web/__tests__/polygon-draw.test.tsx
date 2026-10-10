@@ -75,6 +75,22 @@ it("Enter from an INPUT target does not close the polygon (form-field guard)", (
   input.remove();
 });
 
+it("Enter from a BUTTON target activates the control only (no polygon commit)", () => {
+  const { ref, onPolygon } = setup();
+  ref.current!.handleMapClick([39.0, 21.0]);
+  ref.current!.handleMapClick([39.1, 21.0]);
+  ref.current!.handleMapClick([39.05, 21.1]);
+  // Re-review residual of Issue 4: Enter on a focused control (Search
+  // submit, a draw toggle, a suggestion chip) both activates that control
+  // AND used to run the polygon close path — the same two-POST class.
+  const button = document.createElement("button");
+  document.body.appendChild(button);
+  fireEvent.keyDown(button, { key: "Enter" });
+  expect(onPolygon).not.toHaveBeenCalled();
+  expect(fetchMock).not.toHaveBeenCalled();
+  button.remove();
+});
+
 it("double-click near the last vertex closes (no duplicate vertex appended)", () => {
   const { ref, onPolygon } = setup();
   // Controlled clock (R-7a): the close gesture's <250ms window must not

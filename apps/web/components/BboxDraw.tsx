@@ -120,14 +120,20 @@ export default function BboxDraw({
   useEffect(() => {
     if (!active) return;
     function onKeyDown(event: KeyboardEvent) {
-      // Skip while typing in a field so Enter in the search box submits the
-      // search only — never closes the in-progress polygon (DetailPanel's
-      // target-guard idiom).
+      // Skip while typing in a field or activating a control so Enter in the
+      // search box, or on a focused button/link, runs that control only —
+      // never also closes the in-progress polygon (DetailPanel's
+      // target-guard idiom, extended past form fields: Enter on a focused
+      // BUTTON/SELECT/A is its activation key, same two-POST class).
       const target = event.target;
       if (
         target instanceof HTMLElement &&
         (target.tagName === "INPUT" ||
           target.tagName === "TEXTAREA" ||
+          target.tagName === "BUTTON" ||
+          target.tagName === "SELECT" ||
+          target.tagName === "A" ||
+          target.getAttribute("role") === "button" ||
           target.isContentEditable)
       ) {
         return;

@@ -77,12 +77,20 @@ it("results rows and detail chips get the focus-visible ring (audit #10)", () =>
     "results-row",
   );
 
-  // pin the CSS itself — the classes are useless if the rule is missing
+  // pin the CSS itself — the classes are useless if the rule is missing.
+  // Compare whole selectors: a substring check on "button:focus-visible"
+  // also matches ".button:focus-visible", so deleting the bare element
+  // selector (the one that covers unclassed buttons) would go unnoticed.
   const css = readFileSync(path.resolve(process.cwd(), "app/globals.css"), "utf8");
   const rule = css.match(/\.button:focus-visible[\s\S]*?\{[^}]+\}/);
   expect(rule).not.toBeNull();
   expect(rule![0]).toContain("outline: var(--focus-ring)");
-  expect(rule![0]).toContain("button:focus-visible");
-  expect(rule![0]).toContain(".chip:focus-visible");
-  expect(rule![0]).toContain(".results-row:focus-visible");
+  const selectors = rule![0]
+    .split("{")[0]
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  expect(selectors).toContain("button:focus-visible");
+  expect(selectors).toContain(".chip:focus-visible");
+  expect(selectors).toContain(".results-row:focus-visible");
 });
