@@ -6,8 +6,8 @@ USER="${GEO_USER:-demo}"; PASS="${GEO_PASS:-demo-pass-123}"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 # 1) OpenAPI shape consistent 20/20 (was: alternating 10/11 paths).
-# Post-merge default is 11; Task 4 adds /coverage and bumps the default to 12.
-EXPECTED="${GEO_EXPECTED_PATHS:-11}"
+# Default is 12 post-Task-4 (/coverage added); override for older deploys.
+EXPECTED="${GEO_EXPECTED_PATHS:-12}"
 for i in $(seq 1 20); do
   paths=$(curl -sf "$BASE/api/openapi.json" | python3 -c "import json,sys; print(len(json.load(sys.stdin)['paths']))")
   [ "$paths" = "$EXPECTED" ] || fail "openapi paths=$paths (expect $EXPECTED) on request $i"
