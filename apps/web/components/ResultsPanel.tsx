@@ -11,6 +11,11 @@ export interface ResultsPanelProps {
    *  `null`. Optional so existing renders without it stay valid (finding 13);
    *  the page mirrors it onto the map/3D `hoveredId` paint. */
   onHover?: (id: string | null) => void;
+  /** Export callbacks (fix-improve Task 1): toolbar renders only when both
+   *  are present, so other renders stay valid — same optional pattern as
+   *  `onHover`. */
+  onExportGeoJSON?: () => void;
+  onExportCSV?: () => void;
 }
 
 /**
@@ -28,9 +33,32 @@ export default function ResultsPanel({
   selectedId,
   onPick,
   onHover,
+  onExportGeoJSON,
+  onExportCSV,
 }: ResultsPanelProps) {
   return (
-    <ul
+    <>
+      {onExportGeoJSON && onExportCSV && (
+        <div className="results-toolbar" data-testid="results-toolbar">
+          <button
+            type="button"
+            className="button button--ghost"
+            data-testid="export-geojson"
+            onClick={onExportGeoJSON}
+          >
+            GeoJSON
+          </button>
+          <button
+            type="button"
+            className="button button--ghost"
+            data-testid="export-csv"
+            onClick={onExportCSV}
+          >
+            CSV
+          </button>
+        </div>
+      )}
+      <ul
       aria-label="Search results"
       style={{
         listStyle: "none",
@@ -64,6 +92,7 @@ export default function ResultsPanel({
           </li>
         );
       })}
-    </ul>
+      </ul>
+    </>
   );
 }
