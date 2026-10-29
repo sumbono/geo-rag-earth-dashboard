@@ -46,4 +46,16 @@ describe("landing page", () => {
     expect(card).toHaveTextContent("demo");
     expect(card).toHaveTextContent("demo-pass-123");
   });
+
+  it("keeps every e2e landmark after the redesign", () => {
+    render(<Page />);
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Geo-RAG Earth Dashboard");
+    expect(screen.getByTestId("gif-slot")).toBeInTheDocument();
+    const card = screen.getByTestId("demo-access-card");
+    expect(card).toHaveTextContent("demo");
+    expect(card).toHaveTextContent("demo-pass-123");
+    expect(card).toHaveTextContent(/public sandbox with sample data/i);
+    expect(screen.getByRole("link", { name: /github repository/i })).toBeInTheDocument();
+    expect(screen.getAllByRole("link").some((a) => a.getAttribute("href") === "/login")).toBe(true);
+  });
 });

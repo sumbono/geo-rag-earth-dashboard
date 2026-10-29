@@ -35,7 +35,7 @@ docker compose logs db | grep "02-seed: restored"   # fixture dump restored
 # then open http://localhost:3000 and log in (below)
 ```
 
-Two honest notes on the first run:
+Three honest notes on the first run:
 
 - **First search downloads model weights.** The default `ENCODER=remoteclip`
   fetches the 578 MB RemoteCLIP checkpoint inside the api container on the
@@ -43,6 +43,10 @@ Two honest notes on the first run:
   is fast (measured p95 in [docs/benchmarks.md](docs/benchmarks.md)). Set
   `ENCODER=fake` in `.env` before `up` to run fully offline with a
   deterministic stand-in encoder.
+- **Fonts are fetched at build time.** `next/font/google` pulls Space
+  Grotesk, Inter and JetBrains Mono during the web build —
+  `docker compose build` / `npm run build` need network once (cached
+  afterwards).
 - `docker compose down` stops the stack; `docker compose down -v &&
   docker compose up -d` resets the database and re-restores the fixture
   dump.

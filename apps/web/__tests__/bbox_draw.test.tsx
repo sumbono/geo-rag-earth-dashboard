@@ -25,7 +25,9 @@ const hoisted = vi.hoisted(() => {
   class MockPopup {
     setLngLat = vi.fn((): any => this);
     setHTML = vi.fn((): any => this);
+    setDOMContent = vi.fn((): any => this);
     addTo = vi.fn((): any => this);
+    remove = vi.fn();
   }
 
   class MockMap {
@@ -333,6 +335,36 @@ describe("bbox draw search", () => {
     expect(last.features).toEqual([]);
   });
 
+  it("ships a dashed draw-preview line layer plus the R-6a corner-A dot circle layer", () => {
+    stubFetch({});
+    render(<DashboardPage />);
+
+    // The Map mock hands the raw style through, so the layer set is observable.
+    const style = hoisted.mapInstances[0].options.style;
+    const line = style.layers.find((l: any) => l.id === "draw-preview");
+    expect(line).toMatchObject({
+      type: "line",
+      source: "preview",
+      paint: { "line-color": "#0b6f8f", "line-dasharray": [2, 2] },
+      // Only polygons: a Point on a line layer would draw nothing anyway,
+      // but the explicit filter keeps the two preview layers disjoint.
+      filter: ["!=", ["geometry-type"], "Point"],
+    });
+    const dot = style.layers.find((l: any) => l.id === "draw-preview-dot");
+    expect(dot).toMatchObject({
+      type: "circle",
+      source: "preview",
+      // Circle buckets paint EVERY vertex of every feature they receive
+      // (maplibre CircleBucket.addFeature), so the dot layer must be filtered
+      // to Point features or the completed box would bloom with corner dots.
+      filter: ["==", ["geometry-type"], "Point"],
+      paint: { "circle-radius": 5, "circle-color": "#0b6f8f", "circle-opacity": 0.9 },
+    });
+    // Distinct from the persisted layer, and its source starts empty.
+    expect(style.layers.some((l: any) => l.id === "draw-rectangle")).toBe(true);
+    expect(style.sources.preview.data.features).toEqual([]);
+  });
+
   it("shows the empty state when a bbox search returns nothing", async () => {
     stubFetch({ "/api/search/bbox": { results: [] } });
     render(<DashboardPage />);
@@ -344,8 +376,11 @@ describe("bbox draw search", () => {
     drawClick(40, 23);
     drawClick(38, 21);
 
+    // The first-run guide renders the same chip before any search, so wait
+    // for the empty-state region first, then pin the chip inside it.
+    const emptyState = await screen.findByRole("region", { name: "No results" });
     expect(
-      await screen.findByRole("button", { name: "turquoise coastal water" }),
+      within(emptyState).getByRole("button", { name: "turquoise coastal water" }),
     ).toBeInTheDocument();
   });
 
@@ -398,9 +433,19 @@ describe("bbox draw search", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "bbox search failed",
     );
-    // No rectangle for a failed search, and the toggle disarmed.
+    // Visual-first (Task 6, finding 8): the rectangle is handed to the map
+    // at corner B BEFORE the request leaves, so on failure the drawn box
+    // STAYS — the user sees what they drew and the alert explains the error.
+    // (Pre-Task-6 this asserted no rectangle; the disarm + single-error
+    // intent of the test is unchanged.)
     const map = hoisted.mapInstances[0];
-    expect(map.rectangleData.mock.calls.at(-1)[0].features).toEqual([]);
+    expect(map.rectangleData.mock.calls.at(-1)[0].features[0].geometry.coordinates[0]).toEqual([
+      [38, 21],
+      [40, 21],
+      [40, 23],
+      [38, 23],
+      [38, 21],
+    ]);
     expect(
       screen.getByRole("button", { name: "Draw area" }),
     ).toHaveAttribute("aria-pressed", "false");

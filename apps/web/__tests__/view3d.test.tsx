@@ -42,6 +42,7 @@ const hoisted = vi.hoisted(() => {
   class MockMesh {
     geometry: InstanceType<typeof MockGeometry>;
     material: InstanceType<typeof MockMaterial>;
+    scale = { set: vi.fn() };
     position = {
       x: 0,
       y: 0,
@@ -127,7 +128,9 @@ const hoisted = vi.hoisted(() => {
   class MockPopup {
     setLngLat = vi.fn((): unknown => this);
     setHTML = vi.fn((): unknown => this);
+    setDOMContent = vi.fn((): unknown => this);
     addTo = vi.fn((): unknown => this);
+    remove = vi.fn();
   }
 
   const renderers: InstanceType<typeof MockRenderer>[] = [];
@@ -356,6 +359,21 @@ describe("View3D", () => {
       expect(old.geometry.dispose).toHaveBeenCalledTimes(1);
       expect(old.material.dispose).toHaveBeenCalledTimes(1);
     }
+  });
+
+  it("scales and accent-colors only the hovered point (cross-highlight)", () => {
+    render(<View3D results={sampleResults} hoveredId="tile-1" />);
+
+    const [first, second] = hoisted.scenes[0].children;
+    // Hovered: ×1.4 scale + brand accent (#0b6f8f).
+    expect(first.scale.set).toHaveBeenCalledWith(1.4, 1.4, 1.4);
+    expect(first.material.color.r).toBeCloseTo(0x0b / 255, 6);
+    expect(first.material.color.g).toBeCloseTo(0x6f / 255, 6);
+    expect(first.material.color.b).toBeCloseTo(0x8f / 255, 6);
+    // Everyone else keeps the score-ramp size and color.
+    expect(second.scale.set).not.toHaveBeenCalled();
+    expect(second.material.color.r).toBeCloseTo(0.4321, 6);
+    expect(second.material.color.b).toBeCloseTo(1 - 0.4321, 6);
   });
 
   it("falls back to a 3D unavailable message when WebGLRenderingContext is missing", () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import ScoreBarChart from "./ScoreBarChart";
 import type { SearchResult } from "../lib/types";
 
@@ -10,6 +10,17 @@ export interface DetailPanelProps {
   onClose: () => void;
   /** All ranked hits for the embedded chart; defaults to just `tile`. */
   results?: SearchResult[];
+  /** Prev/next step through `results` (Task 9). Optional so existing renders
+   *  without it stay valid (finding 13); the page wraps the index modulo
+   *  `results.length`. Wired to the header buttons AND ArrowLeft/ArrowRight
+   *  on `window` (listener removed on unmount). */
+  onNavigate?: (delta: 1 | -1) => void;
+  /** One-shot focus intent (Task 9 fix R1): the page's tile `key` remounts
+   *  this panel on every prev/next, so the pressed button node is destroyed —
+   *  on mount, focus moves to the named button instead of falling back to
+   *  `<body>`. The page clears its intent after that commit, so unrelated
+   *  remounts never steal focus. Optional (finding 13). */
+  initialFocus?: "prev" | "next";
 }
 
 /** Flatten every ring's points into an axis-aligned "W, S → E, N" string. */
@@ -26,9 +37,9 @@ function formatBbox(bbox: number[][][]): string {
 }
 
 const chipStyle: CSSProperties = {
-  padding: "4px 10px",
-  borderRadius: 999,
-  border: "1px solid var(--border, #d7e0e8)",
+  padding: "var(--space-3xs) var(--space-xs)",
+  borderRadius: "var(--radius-control)",
+  border: "1px solid var(--color-rule-2)",
   background: "transparent",
   cursor: "pointer",
   font: "inherit",
@@ -46,23 +57,58 @@ export default function DetailPanel({
   tile,
   onClose,
   results,
+  onNavigate,
+  initialFocus,
 }: DetailPanelProps) {
   const [falseColor, setFalseColor] = useState(false);
   const chartResults = results ?? [tile];
   const thumbSrc = falseColor ? `${tile.thumb_url}?fc=1` : tile.thumb_url;
+  const prevButtonRef = useRef<HTMLButtonElement | null>(null);
+  const nextButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  // Focus restore across the remount (Task 9 fix R1): land on the button the
+  // user just pressed so keyboard/AT users keep their place in the panel.
+  useEffect(() => {
+    if (initialFocus === "next") nextButtonRef.current?.focus();
+    else if (initialFocus === "prev") prevButtonRef.current?.focus();
+  }, [initialFocus]);
+
+  // Arrow keys step through results while the panel is open (Task 9). The
+  // listener lives here — the panel only mounts when a tile is selected, so
+  // there is no "select from nothing" keyboard branch on the page (finding
+  // 21). Skipped while typing in a field so editing text keeps its carets;
+  // removed on unmount so a closed panel never navigates (finding 24's
+  // cleanup pattern applied to the keydown listener).
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (event.key === "ArrowRight") onNavigate?.(1);
+      else if (event.key === "ArrowLeft") onNavigate?.(-1);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onNavigate]);
 
   return (
     <section
       aria-label="Tile details"
       className="detail-panel"
       style={{
-        background: "var(--surface, #ffffff)",
-        border: "1px solid var(--border, #d7e0e8)",
-        borderRadius: 14,
-        padding: 16,
+        background: "var(--color-paper-2)",
+        border: "var(--rule)",
+        borderRadius: "var(--radius-card)",
+        padding: "var(--space-sm)",
         display: "flex",
         flexDirection: "column",
-        gap: 12,
+        gap: "var(--space-xs)",
       }}
     >
       <header
@@ -74,18 +120,45 @@ export default function DetailPanel({
         }}
       >
         <h2 style={{ margin: 0, fontSize: "1.05rem" }}>Tile details</h2>
+        <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
+          <button
+            ref={prevButtonRef}
+            type="button"
+            className="chip"
+            aria-label="Previous result"
+            // With fewer than 2 hits there is nothing to cycle — the page
+            // would silently no-op, so say so for assistive tech (fix R1m).
+            disabled={chartResults.length < 2}
+            onClick={() => onNavigate?.(-1)}
+            style={chipStyle}
+          >
+            ‹ Previous
+          </button>
+          <button
+            ref={nextButtonRef}
+            type="button"
+            className="chip"
+            aria-label="Next result"
+            disabled={chartResults.length < 2}
+            onClick={() => onNavigate?.(1)}
+            style={chipStyle}
+          >
+            Next ›
+          </button>
+        </div>
         <button
           type="button"
+          className="chip"
           aria-label="Close"
           onClick={onClose}
           style={{
-            border: "1px solid var(--border, #d7e0e8)",
-            borderRadius: 8,
+            border: "1px solid var(--color-rule-2)",
+            borderRadius: "var(--radius-control)",
             background: "transparent",
             cursor: "pointer",
             font: "inherit",
             lineHeight: 1,
-            padding: "4px 10px",
+            padding: "var(--space-3xs) var(--space-xs)",
           }}
         >
           ×
@@ -107,9 +180,9 @@ export default function DetailPanel({
             style={{
               width: "100%",
               maxWidth: 360,
-              borderRadius: 8,
+              borderRadius: "var(--radius-card)",
               display: "block",
-              background: "#e1e8ee",
+              background: "var(--color-rule)",
             }}
           />
           <div
@@ -119,30 +192,32 @@ export default function DetailPanel({
           >
             <button
               type="button"
+              className="chip"
               aria-pressed={!falseColor}
               onClick={() => setFalseColor(false)}
               style={{
                 ...chipStyle,
-                background: falseColor ? "transparent" : "var(--accent, #0b6f8f)",
-                color: falseColor ? "inherit" : "#ffffff",
+                background: falseColor ? "transparent" : "var(--color-accent)",
+                color: falseColor ? "inherit" : "var(--color-accent-ink)",
                 borderColor: falseColor
-                  ? "var(--border, #d7e0e8)"
-                  : "var(--accent, #0b6f8f)",
+                  ? "var(--color-rule-2)"
+                  : "var(--color-accent)",
               }}
             >
               True color
             </button>
             <button
               type="button"
+              className="chip"
               aria-pressed={falseColor}
               onClick={() => setFalseColor(true)}
               style={{
                 ...chipStyle,
-                background: falseColor ? "var(--accent, #0b6f8f)" : "transparent",
-                color: falseColor ? "#ffffff" : "inherit",
+                background: falseColor ? "var(--color-accent)" : "transparent",
+                color: falseColor ? "var(--color-accent-ink)" : "inherit",
                 borderColor: falseColor
-                  ? "var(--accent, #0b6f8f)"
-                  : "var(--border, #d7e0e8)",
+                  ? "var(--color-accent)"
+                  : "var(--color-rule-2)",
               }}
             >
               False color
@@ -160,15 +235,15 @@ export default function DetailPanel({
             fontSize: "0.92rem",
           }}
         >
-          <dt style={{ color: "var(--ink-soft, #4a5b6a)", fontWeight: 600 }}>
+          <dt style={{ color: "var(--color-ink-soft)", fontWeight: 600 }}>
             Captured
           </dt>
           <dd style={{ margin: 0 }}>{tile.captured_at}</dd>
-          <dt style={{ color: "var(--ink-soft, #4a5b6a)", fontWeight: 600 }}>
+          <dt style={{ color: "var(--color-ink-soft)", fontWeight: 600 }}>
             Bounding box
           </dt>
           <dd style={{ margin: 0 }}>{formatBbox(tile.bbox)}</dd>
-          <dt style={{ color: "var(--ink-soft, #4a5b6a)", fontWeight: 600 }}>
+          <dt style={{ color: "var(--color-ink-soft)", fontWeight: 600 }}>
             Score
           </dt>
           <dd style={{ margin: 0 }}>{tile.score.toFixed(2)}</dd>

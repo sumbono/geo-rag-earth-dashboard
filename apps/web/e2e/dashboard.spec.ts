@@ -39,6 +39,17 @@ function layerFeatureCount(page: import("@playwright/test").Page, layer: string)
   }, layer);
 }
 
+/** The proven demo login — shared by every flow in this spec (Task 10). */
+async function login(page: import("@playwright/test").Page) {
+  await page.goto("/login");
+  await page.getByLabel("Username").fill("demo");
+  await page.getByLabel("Password").fill("demo-pass-123");
+  await page.getByRole("button", { name: "Log in", exact: true }).click();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  const searchInput = page.getByRole("searchbox", { name: "Search" });
+  await expect(searchInput).toBeVisible();
+}
+
 test("dashboard: login → search → detail → bbox draw → telemetry chart", async ({
   page,
 }) => {
@@ -78,13 +89,8 @@ test("dashboard: login → search → detail → bbox draw → telemetry chart",
   );
 
   // ── 1. login (demo credentials) ─────────────────────────────────────────
-  await page.goto("/login");
-  await page.getByLabel("Username").fill("demo");
-  await page.getByLabel("Password").fill("demo-pass-123");
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await expect(page).toHaveURL(/\/dashboard$/);
+  await login(page);
   const searchInput = page.getByRole("searchbox", { name: "Search" });
-  await expect(searchInput).toBeVisible();
 
   // ── 2. type a query → ranked results appear ─────────────────────────────
   await searchInput.fill("water");
@@ -193,4 +199,39 @@ test("dashboard: login → search → detail → bbox draw → telemetry chart",
   // Spec §6: the security headers never broke the app — no CSP refusal
   // (script/style/img/connect/worker) was logged across the whole flow.
   expect(cspViolations).toEqual([]);
+});
+
+test("first-run guide and suggestion chips lead to results", async ({ page }) => {
+  await login(page);
+  // Guide visible before any search (Review Focus #2)
+  await expect(page.getByRole("heading", { name: /how this works/i })).toBeVisible();
+  // Chip → results (exactly one search POST)
+  const searchPromise = page.waitForResponse((r) => r.url().includes("/api/search/vector") && r.request().method() === "POST");
+  await page.getByRole("button", { name: "turquoise coastal water" }).first().click();
+  await searchPromise;
+  await expect(page.getByRole("heading", { name: /how this works/i })).toHaveCount(0);
+  await expect(page.getByTestId("result-row").first()).toBeVisible(); // testid added in Task 5's ResultsPanel step
+});
+
+test("polygon draw searches an area", async ({ page }) => {
+  await login(page);
+  await page.getByRole("button", { name: "Draw polygon" }).click();
+  await page.locator(".maplibregl-canvas").waitFor({ state: "visible" });
+  const canvas = page.locator(".maplibregl-canvas");
+  const box = (await canvas.boundingBox())!;
+  // Sentinel instead of a blind timeout (finding 14 / Review Focus #5): click 1,
+  // then WAIT for the status strip to report the first vertex — that text can only
+  // appear if the click registered on a loaded style, so a slow cold stack fails
+  // loudly here instead of silently no-op'ing every vertex.
+  await canvas.click({ position: { x: box.width * 0.45, y: box.height * 0.40 } });
+  // exact pattern: only the POST-click-1 status ("1 vertex — …") matches; the
+  // pre-click "0 vertices" text does not (Task 7 pins the format)
+  await expect(page.getByRole("status").filter({ hasText: /^1 vertex —/ }).first()).toBeVisible({ timeout: 15_000 });
+  for (const [fx, fy] of [[0.60, 0.40], [0.55, 0.55]]) {
+    await canvas.click({ position: { x: box.width * fx, y: box.height * fy } });
+  }
+  const req = page.waitForResponse((r) => r.url().includes("/api/search/polygon"));
+  await page.keyboard.press("Enter");
+  const res = await req;
+  expect(res.status()).toBe(200);
 });
