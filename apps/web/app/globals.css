@@ -474,6 +474,13 @@ input:focus-visible {
   color: var(--color-ink-soft);
 }
 
+/* --- data note: honesty labels on simulated/derived series (fix-improve Task 3) --- */
+.data-note {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-ink-soft);
+}
+
 /* --- results toolbar: export actions above the list (fix-improve Task 1) --- */
 .results-toolbar {
   display: flex;

@@ -86,14 +86,21 @@ afterEach(() => {
 });
 
 describe("TelemetryChart", () => {
-  it("fetches the default buoy's 24h window and draws one line path", async () => {
+  it("fetches the default buoy's 168h window, draws one line path, labels the series simulated", async () => {
     stubFetch(200, { points: threePoints, count: 3 });
     const { container } = render(<TelemetryChart />);
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("/api/telemetry/query?buoy_id=buoy-rs-1&hours=24");
+    // fix-improve Task 3: window matches the 7-day seed (168h), not 24h —
+    // a 24h default empties the chart within a day of seeding.
+    expect(url).toBe("/api/telemetry/query?buoy_id=buoy-rs-1&hours=168");
     expect(init?.credentials).toBe("include");
+
+    // Honesty label: the series is synthetic and must say so.
+    expect(screen.getByTestId("telemetry-sim-note")).toHaveTextContent(
+      /simulated demo series/i,
+    );
 
     const paths = container.querySelectorAll("path");
     expect(paths).toHaveLength(1);
@@ -169,7 +176,7 @@ describe("TelemetryChart", () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(String(fetchMock.mock.calls[1][0])).toBe(
-      "/api/telemetry/query?buoy_id=buoy-rs-3&hours=24",
+      "/api/telemetry/query?buoy_id=buoy-rs-3&hours=168",
     );
     // The selector offers all five Red Sea buoys.
     const options = screen.getAllByRole("option");
@@ -218,7 +225,7 @@ describe("dashboard Telemetry tab", () => {
     expect(await screen.findByText("No telemetry")).toBeInTheDocument();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(String(fetchMock.mock.calls[0][0])).toBe(
-      "/api/telemetry/query?buoy_id=buoy-rs-1&hours=24",
+      "/api/telemetry/query?buoy_id=buoy-rs-1&hours=168",
     );
     // The old `<div>Telemetry</div>` placeholder is gone.
     expect(
