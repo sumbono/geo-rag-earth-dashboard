@@ -43,4 +43,19 @@ describe("ResultsPanel relative-similarity framing (fix-improve Task 2)", () => 
     render(<ResultsPanel results={TWO} onPick={() => {}} />);
     expect(screen.queryByTestId("results-toolbar")).not.toBeInTheDocument();
   });
+
+  it("renders a single root element so the dashboard grid keeps one item (fix-pass Critical 2)", () => {
+    // ResultsPanel is a direct child of `.dash-grid` (2-col grid): a fragment
+    // of toolbar+caption+ul would auto-place three grid items and push the
+    // results list below the map's full height. One wrapper = one grid item.
+    const { container } = render(
+      <ResultsPanel
+        results={TWO}
+        onPick={() => {}}
+        onExportGeoJSON={() => {}}
+        onExportCSV={() => {}}
+      />,
+    );
+    expect(container.children).toHaveLength(1);
+  });
 });

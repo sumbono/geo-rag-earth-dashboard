@@ -447,27 +447,6 @@ export default function Map({
     },
   }), []);
 
-  // Coverage footprint (fix-improve Task 4): static source/layer declared in
-  // the style above; this only swaps the data in. Same getSource/load guard
-  // pattern as applyBox. A failed fetch is non-fatal — coverage explains
-  // empty results, it is not required to use the map.
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    const apply = () => {
-      apiFetch<CoverageFC>("/api/coverage")
-        .then((fc) => {
-          const source = map.getSource(COVERAGE_SOURCE) as GeoJSONSource | undefined;
-          source?.setData(fc as unknown as FeatureCollection);
-        })
-        .catch(() => {
-          /* nicety: leave the map fully usable without the outline */
-        });
-    };
-    if (map.getSource(COVERAGE_SOURCE)) apply();
-    else map.once("load", apply);
-  }, []);
-
   useEffect(() => {
     if (typeof window === "undefined") return;
     const container = containerRef.current;
@@ -521,6 +500,29 @@ export default function Map({
       map.remove();
       mapRef.current = null;
     };
+  }, []);
+
+  // Coverage footprint (fix-improve Task 4, order fixed in the final-review
+  // fix pass): MUST sit below the map-creation effect — effects run in
+  // declaration order and mapRef is only set there. Static source/layer are
+  // declared in the style above; this only swaps the data in. Same
+  // getSource/load guard pattern as applyBox. A failed fetch is non-fatal —
+  // coverage explains empty results, it is not required to use the map.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const apply = () => {
+      apiFetch<CoverageFC>("/api/coverage")
+        .then((fc) => {
+          const source = map.getSource(COVERAGE_SOURCE) as GeoJSONSource | undefined;
+          source?.setData(fc as unknown as FeatureCollection);
+        })
+        .catch(() => {
+          /* nicety: leave the map fully usable without the outline */
+        });
+    };
+    if (map.getSource(COVERAGE_SOURCE)) apply();
+    else map.once("load", apply);
   }, []);
 
   // Fresh results: push the collection (painted with the CURRENT hover via

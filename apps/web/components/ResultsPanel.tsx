@@ -37,7 +37,10 @@ export default function ResultsPanel({
   onExportCSV,
 }: ResultsPanelProps) {
   return (
-    <>
+    // One root element (final-review fix): this component is a direct child
+    // of `.dash-grid`, so a fragment would spread toolbar/caption/ul across
+    // grid cells and push the results list below the map's full height.
+    <div className="results-panel">
       {onExportGeoJSON && onExportCSV && (
         <div className="results-toolbar" data-testid="results-toolbar">
           <button
@@ -97,6 +100,6 @@ export default function ResultsPanel({
         );
       })}
       </ul>
-    </>
+    </div>
   );
 }

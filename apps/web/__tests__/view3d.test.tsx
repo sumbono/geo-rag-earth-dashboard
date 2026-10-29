@@ -243,11 +243,15 @@ beforeEach(() => {
   consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
   consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-  fetchMock.mockResolvedValue(
-    new Response(JSON.stringify({ points: [], count: 0 }), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    }),
+  // Fresh Response PER CALL (one-shot bodies): the dashboard fetches
+  // /api/coverage on mount (final-review fix) before the telemetry request.
+  fetchMock.mockImplementation(() =>
+    Promise.resolve(
+      new Response(JSON.stringify({ points: [], count: 0 }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    ),
   );
   vi.stubGlobal("fetch", fetchMock);
 

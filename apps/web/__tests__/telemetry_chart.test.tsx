@@ -48,11 +48,15 @@ vi.mock("maplibre-gl", () => ({
 const fetchMock = vi.fn<typeof fetch>();
 
 function stubFetch(status: number, body: unknown) {
-  fetchMock.mockResolvedValue(
-    new Response(JSON.stringify(body), {
-      status,
-      headers: { "content-type": "application/json" },
-    }),
+  // Fresh Response PER CALL (one-shot bodies): the dashboard fetches
+  // /api/coverage on mount before the chart's own request (final-review fix).
+  fetchMock.mockImplementation(() =>
+    Promise.resolve(
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { "content-type": "application/json" },
+      }),
+    ),
   );
   vi.stubGlobal("fetch", fetchMock);
 }
@@ -223,8 +227,9 @@ describe("dashboard Telemetry tab", () => {
     fireEvent.click(screen.getByRole("button", { name: "Telemetry" }));
 
     expect(await screen.findByText("No telemetry")).toBeInTheDocument();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    expect(String(fetchMock.mock.calls[0][0])).toBe(
+    // coverage (mount) + the telemetry query
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(String(fetchMock.mock.calls[1][0])).toBe(
       "/api/telemetry/query?buoy_id=buoy-rs-1&hours=168",
     );
     // The old `<div>Telemetry</div>` placeholder is gone.
