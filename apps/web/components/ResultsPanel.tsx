@@ -58,6 +58,9 @@ export default function ResultsPanel({
           </button>
         </div>
       )}
+      <p className="results-caption" data-testid="score-caption">
+        Relative similarity within these results (CLIP cosine) — best first.
+      </p>
       <ul
       aria-label="Search results"
       style={{
@@ -71,7 +74,7 @@ export default function ResultsPanel({
         overflowY: "auto",
       }}
     >
-      {results.map((result) => {
+      {results.map((result, index) => {
         const selected = result.id === selectedId;
         return (
           <li key={result.id}>
@@ -86,6 +89,7 @@ export default function ResultsPanel({
               onFocus={() => onHover?.(result.id)}
               onBlur={() => onHover?.(null)}
             >
+              <span>#{index + 1}</span>
               <span>{result.score.toFixed(2)}</span>
               <span>{result.captured_at.slice(0, 10)}</span>
             </button>

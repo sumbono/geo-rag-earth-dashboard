@@ -10,6 +10,13 @@ describe("landing page", () => {
     ).toBeInTheDocument();
   });
 
+  it("explains scores as relative to the query, never as absolute 0-1 match", () => {
+    render(<Page />);
+    expect(screen.getByText(/relative to your query, not an absolute probability/i)).toBeInTheDocument();
+    expect(screen.getByText(/relative to the other results for this query/i)).toBeInTheDocument();
+    expect(screen.queryByText(/1\.00\s*near-exact/i)).not.toBeInTheDocument();
+  });
+
   it("links to the login page", () => {
     render(<Page />);
     const links = screen.getAllByRole("link");

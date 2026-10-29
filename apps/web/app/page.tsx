@@ -108,7 +108,8 @@ export default function Home() {
                 <span className="how__step-label">Step 02</span>
                 <h3 className="how__step-title">Results rank by score</h3>
                 <p className="how__step-body">
-                  Every match carries a score from 0 to 1 and sorts best-first.
+                  Every match carries a similarity score and sorts best-first — the
+                  ranking is relative to your query, not an absolute probability.
                 </p>
               </li>
               <li className="how__step">
@@ -120,8 +121,9 @@ export default function Home() {
               </li>
             </ol>
             <p className="how__note">
-              Score is a semantic match between your words and the scene — 1.00
-              near-exact, 0.00 unrelated. Date is the satellite capture date.
+              Score is the semantic similarity between your words and the scene,
+              relative to the other results for this query. Date is the satellite
+              capture date.
             </p>
           </div>
         </section>

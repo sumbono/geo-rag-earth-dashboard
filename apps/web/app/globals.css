@@ -467,6 +467,13 @@ input:focus-visible {
   margin: 0;
 }
 
+/* --- results caption: relative-similarity framing (fix-improve Task 2) --- */
+.results-caption {
+  margin: 0 0 var(--space-2xs);
+  font-size: 0.85rem;
+  color: var(--color-ink-soft);
+}
+
 /* --- results toolbar: export actions above the list (fix-improve Task 1) --- */
 .results-toolbar {
   display: flex;
