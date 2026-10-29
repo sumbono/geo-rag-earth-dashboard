@@ -57,7 +57,8 @@ export default function Home() {
 
           <aside className="demo-card" data-testid="demo-access-card">
             <p className="demo-card__tagline">
-              Public sandbox with sample data
+              Public sandbox — fixed sample of 100 Sentinel-2 chips (Red Sea,
+              single day) · full ingest pipeline included
             </p>
             <p className="demo-card__creds">
               <span className="demo-card__field">
