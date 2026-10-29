@@ -10,7 +10,9 @@ import {
   type StyleSpecification,
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import type { Bbox, SearchResult } from "../lib/types";
+import { apiFetch } from "../lib/api";
+import { buildCoverageLayerSpec, COVERAGE_SOURCE } from "../lib/coverage";
+import type { Bbox, CoverageFC, SearchResult } from "../lib/types";
 
 /**
  * R13(b) — pin the worker to the copy in `public/`.
@@ -62,6 +64,11 @@ const SCORE_LOW_HEX = "#2563eb";
 const SCORE_MID_HEX = "#38bdf8";
 const SCORE_HIGH_HEX = "#facc15";
 
+/** Coverage footprint (fix-improve Task 4): declared in the static style
+ *  below (this component never calls addSource/addLayer — the style spec is
+ *  fixed up front), then filled via setData once GET /api/coverage lands. */
+const coverageSpec = buildCoverageLayerSpec(ACCENT_HEX);
+
 const EMPTY_FC: FeatureCollection = {
   type: "FeatureCollection",
   features: [],
@@ -106,6 +113,7 @@ const style: StyleSpecification = {
       type: "geojson",
       data: EMPTY_FC,
     },
+    [coverageSpec.sourceId]: coverageSpec.source,
   },
   layers: [
     { id: "esri-imagery", type: "raster", source: ESRI_SOURCE },
@@ -177,6 +185,7 @@ const style: StyleSpecification = {
       source: POLYGON_SOURCE,
       paint: { "line-color": ACCENT_HEX, "line-width": 2 },
     },
+    { ...coverageSpec.layer },
     {
       id: MARKERS_LAYER,
       type: "circle",
@@ -491,6 +500,29 @@ export default function Map({
       map.remove();
       mapRef.current = null;
     };
+  }, []);
+
+  // Coverage footprint (fix-improve Task 4, order fixed in the final-review
+  // fix pass): MUST sit below the map-creation effect — effects run in
+  // declaration order and mapRef is only set there. Static source/layer are
+  // declared in the style above; this only swaps the data in. Same
+  // getSource/load guard pattern as applyBox. A failed fetch is non-fatal —
+  // coverage explains empty results, it is not required to use the map.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const apply = () => {
+      apiFetch<CoverageFC>("/api/coverage")
+        .then((fc) => {
+          const source = map.getSource(COVERAGE_SOURCE) as GeoJSONSource | undefined;
+          source?.setData(fc as unknown as FeatureCollection);
+        })
+        .catch(() => {
+          /* nicety: leave the map fully usable without the outline */
+        });
+    };
+    if (map.getSource(COVERAGE_SOURCE)) apply();
+    else map.once("load", apply);
   }, []);
 
   // Fresh results: push the collection (painted with the CURRENT hover via

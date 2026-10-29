@@ -11,6 +11,11 @@ export interface ResultsPanelProps {
    *  `null`. Optional so existing renders without it stay valid (finding 13);
    *  the page mirrors it onto the map/3D `hoveredId` paint. */
   onHover?: (id: string | null) => void;
+  /** Export callbacks (fix-improve Task 1): toolbar renders only when both
+   *  are present, so other renders stay valid — same optional pattern as
+   *  `onHover`. */
+  onExportGeoJSON?: () => void;
+  onExportCSV?: () => void;
 }
 
 /**
@@ -28,9 +33,38 @@ export default function ResultsPanel({
   selectedId,
   onPick,
   onHover,
+  onExportGeoJSON,
+  onExportCSV,
 }: ResultsPanelProps) {
   return (
-    <ul
+    // One root element (final-review fix): this component is a direct child
+    // of `.dash-grid`, so a fragment would spread toolbar/caption/ul across
+    // grid cells and push the results list below the map's full height.
+    <div className="results-panel">
+      {onExportGeoJSON && onExportCSV && (
+        <div className="results-toolbar" data-testid="results-toolbar">
+          <button
+            type="button"
+            className="button button--ghost"
+            data-testid="export-geojson"
+            onClick={onExportGeoJSON}
+          >
+            GeoJSON
+          </button>
+          <button
+            type="button"
+            className="button button--ghost"
+            data-testid="export-csv"
+            onClick={onExportCSV}
+          >
+            CSV
+          </button>
+        </div>
+      )}
+      <p className="results-caption" data-testid="score-caption">
+        Relative similarity within these results (CLIP cosine) — best first.
+      </p>
+      <ul
       aria-label="Search results"
       style={{
         listStyle: "none",
@@ -43,7 +77,7 @@ export default function ResultsPanel({
         overflowY: "auto",
       }}
     >
-      {results.map((result) => {
+      {results.map((result, index) => {
         const selected = result.id === selectedId;
         return (
           <li key={result.id}>
@@ -58,12 +92,14 @@ export default function ResultsPanel({
               onFocus={() => onHover?.(result.id)}
               onBlur={() => onHover?.(null)}
             >
+              <span>#{index + 1}</span>
               <span>{result.score.toFixed(2)}</span>
               <span>{result.captured_at.slice(0, 10)}</span>
             </button>
           </li>
         );
       })}
-    </ul>
+      </ul>
+    </div>
   );
 }

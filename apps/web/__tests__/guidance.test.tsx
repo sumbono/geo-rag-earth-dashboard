@@ -71,8 +71,11 @@ describe("FirstRunGuide", () => {
   it("renders the how-it-works steps and the value explainer when visible", () => {
     render(<FirstRunGuide visible onSuggest={() => {}} />);
     expect(screen.getByRole("heading", { name: /how this works/i })).toBeInTheDocument();
-    // RTL getByText matches direct text nodes — pin through the <li> wrapper:
-    expect(screen.getByText(/score/i).closest("li")).toHaveTextContent(/0\.00/);
+    // RTL getByText matches direct text nodes — pin through the <li> wrapper.
+    // fix-improve Task 2: the guide frames scores as relative, not 1.00/0.00;
+    // /score/i alone is ambiguous now (li + <strong>score</strong> both match),
+    // so lead with the phrase only the li has.
+    expect(screen.getByText(/results rank by/i).closest("li")).toHaveTextContent(/relative to your query/i);
     expect(screen.getByText(/capture date/i).closest("li")).toBeInTheDocument();
   });
 

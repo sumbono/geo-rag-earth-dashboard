@@ -21,7 +21,7 @@ export default function FirstRunGuide({ visible, onSuggest }: FirstRunGuideProps
       <h2 className="guide__title">How this works</h2>
       <ol className="guide__steps">
         <li>Describe a place in plain words — e.g. “shallow turquoise water near a reef”.</li>
-        <li>Results rank by <strong>score</strong>: 1.00 is a near-exact semantic match, 0.00 unrelated.</li>
+        <li>Results rank by <strong>score</strong>: each score is relative to your query — higher means a closer semantic match.</li>
         <li>Each row’s date is the satellite <strong>capture date</strong>; click a result for details, imagery and location.</li>
       </ol>
       <p className="guide__examples-label">Try one:</p>

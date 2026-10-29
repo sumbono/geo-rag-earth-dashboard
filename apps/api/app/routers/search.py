@@ -2,6 +2,7 @@
 import json
 import math
 from datetime import datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
@@ -242,3 +243,38 @@ def search_polygon(
             .limit(limit)
         )
     return VectorSearchResponse(results=[_row_to_result(row) for row in session.execute(stmt)])
+
+
+class CoverageFeature(BaseModel):
+    type: Literal["Feature"] = "Feature"
+    geometry: dict
+    properties: dict
+
+
+class CoverageResponse(BaseModel):
+    type: Literal["FeatureCollection"] = "FeatureCollection"
+    features: list[CoverageFeature]
+
+
+@router.get("/coverage", response_model=CoverageResponse)
+@limiter.limit("60/minute")
+def coverage(
+    request: Request,
+    user: User = Depends(verify_jwt),
+    session: Session = Depends(get_db),
+) -> CoverageResponse:
+    """Footprint of every indexed tile — one statement, JWT-gated.
+
+    The map draws it as the "what is searchable" outline so an empty search
+    outside the indexed area is explainable instead of silent. One SELECT,
+    no pagination: the chip set is bounded (dataset growth is Phase 2).
+    """
+    stmt = select(Tile.id, func.ST_AsGeoJSON(Tile.bbox), Tile.captured_at)
+    features = [
+        CoverageFeature(
+            geometry=json.loads(geojson),
+            properties={"id": str(tid), "captured_at": captured_at.isoformat()},
+        )
+        for tid, geojson, captured_at in session.execute(stmt)
+    ]
+    return CoverageResponse(features=features)

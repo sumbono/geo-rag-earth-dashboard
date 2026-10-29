@@ -62,7 +62,7 @@ export default function TelemetryChart() {
     setPoints(null);
     setError(null);
     apiFetch<{ points: TelemetryPoint[]; count: number }>(
-      `/api/telemetry/query?buoy_id=${buoyId}&hours=24`,
+      `/api/telemetry/query?buoy_id=${buoyId}&hours=168`,
       { signal: controller.signal },
     )
       .then((data) => {
@@ -139,6 +139,9 @@ export default function TelemetryChart() {
       className="telemetry-chart"
       style={{ display: "flex", flexDirection: "column", gap: 8 }}
     >
+      <p className="data-note" data-testid="telemetry-sim-note">
+        Simulated demo series — synthetic buoys, not real sensor data.
+      </p>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <label htmlFor="telemetry-buoy">Buoy</label>
         <select

@@ -56,11 +56,16 @@ vi.mock("maplibre-gl", () => ({
 const fetchMock = vi.fn<typeof fetch>();
 
 function stubFetch(status: number, body: unknown) {
-  fetchMock.mockResolvedValue(
-    new Response(JSON.stringify(body), {
-      status,
-      headers: { "content-type": "application/json" },
-    }),
+  // Fresh Response PER CALL: a Response body is one-shot, and the dashboard
+  // now fetches /api/coverage on mount (final-review fix) before any search —
+  // a shared instance would arrive already-consumed at the second caller.
+  fetchMock.mockImplementation(() =>
+    Promise.resolve(
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { "content-type": "application/json" },
+      }),
+    ),
   );
   vi.stubGlobal("fetch", fetchMock);
 }
@@ -232,7 +237,9 @@ describe("empty state", () => {
     expect(
       empty.getByRole("button", { name: "cloud patterns" }),
     ).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // 2 = mount /api/coverage fetch + the search POST (coverage fetch added
+    // by the final-review fix pass — the dashboard always fetches it).
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("runs exactly one more search POST when a suggestion is clicked", async () => {
@@ -246,12 +253,14 @@ describe("empty state", () => {
     const suggestion = await within(
       await screen.findByRole("region", { name: "No results" }),
     ).findByRole("button", { name: "cloud patterns" });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // coverage (mount) + search #1
+    expect(fetchMock).toHaveBeenCalledTimes(2);
 
     fireEvent.click(suggestion);
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    const [url, init] = fetchMock.mock.calls[1];
+    // coverage + search #1 + search #2 (suggestion click)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    const [url, init] = fetchMock.mock.calls[2];
     expect(url).toBe("/api/search/vector");
     expect(init?.method).toBe("POST");
     expect(JSON.parse(String(init?.body))).toEqual({
@@ -270,7 +279,8 @@ describe("empty state", () => {
       await screen.findByRole("region", { name: "No results" }),
     ).findByRole("button", { name: "turquoise coastal water" });
     fireEvent.click(suggestion);
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    // coverage + search #1 + search #2
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
 
     // The input reflects the active query, so a follow-up manual submit
     // re-runs what the user just saw — not the previous stale text.

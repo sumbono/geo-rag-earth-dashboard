@@ -13,6 +13,7 @@ import ResultsPanel from "../../components/ResultsPanel";
 import SearchBar from "../../components/SearchBar";
 import TelemetryChart from "../../components/TelemetryChart";
 import { ApiError, searchVector } from "../../lib/api";
+import { downloadText, resultsToCSV, resultsToGeoJSON } from "../../lib/export";
 import type { SearchResult } from "../../lib/types";
 
 // three.js must never load during SSR — client-only, loaded on demand when
@@ -258,6 +259,16 @@ export default function DashboardPage() {
               selectedId={selectedId}
               onPick={setSelectedId}
               onHover={setHoveredId}
+              onExportGeoJSON={() =>
+                downloadText(
+                  "search-results.geojson",
+                  "application/geo+json",
+                  resultsToGeoJSON(results),
+                )
+              }
+              onExportCSV={() =>
+                downloadText("search-results.csv", "text/csv", resultsToCSV(results))
+              }
             />
           ) : searched ? (
             // Issue 8: gate on `loading` so a first (or repeat) search in

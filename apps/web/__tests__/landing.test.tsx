@@ -10,6 +10,20 @@ describe("landing page", () => {
     ).toBeInTheDocument();
   });
 
+  it("explains scores as relative to the query, never as absolute 0-1 match", () => {
+    render(<Page />);
+    expect(screen.getByText(/relative to your query, not an absolute probability/i)).toBeInTheDocument();
+    expect(screen.getByText(/relative to the other results for this query/i)).toBeInTheDocument();
+    expect(screen.queryByText(/1\.00\s*near-exact/i)).not.toBeInTheDocument();
+  });
+
+  it("states the honest sample-dataset scope on the demo card (fix-improve Task 5)", () => {
+    render(<Page />);
+    expect(screen.getByText(/100 Sentinel-2 chips/i)).toBeInTheDocument();
+    expect(screen.getByText(/single day/i)).toBeInTheDocument();
+    expect(screen.getByText(/full ingest pipeline included/i)).toBeInTheDocument();
+  });
+
   it("links to the login page", () => {
     render(<Page />);
     const links = screen.getAllByRole("link");
@@ -42,7 +56,8 @@ describe("landing page", () => {
   it("renders the demo access card with the public sandbox credentials", () => {
     render(<Page />);
     const card = screen.getByTestId("demo-access-card");
-    expect(card).toHaveTextContent(/public sandbox with sample data/i);
+    expect(card).toHaveTextContent(/public sandbox/i);
+    expect(card).toHaveTextContent(/fixed sample of 100 Sentinel-2 chips/i);
     expect(card).toHaveTextContent("demo");
     expect(card).toHaveTextContent("demo-pass-123");
   });
@@ -54,7 +69,7 @@ describe("landing page", () => {
     const card = screen.getByTestId("demo-access-card");
     expect(card).toHaveTextContent("demo");
     expect(card).toHaveTextContent("demo-pass-123");
-    expect(card).toHaveTextContent(/public sandbox with sample data/i);
+    expect(card).toHaveTextContent(/public sandbox/i);
     expect(screen.getByRole("link", { name: /github repository/i })).toBeInTheDocument();
     expect(screen.getAllByRole("link").some((a) => a.getAttribute("href") === "/login")).toBe(true);
   });
