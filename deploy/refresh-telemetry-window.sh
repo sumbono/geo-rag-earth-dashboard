@@ -11,8 +11,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DB_URL="${GEO_DATABASE_URL:?set GEO_DATABASE_URL to the live postgres DSN}"
 NET="${GEO_DOCKER_NETWORK:-geo-rag_default}"
-docker run --rm --network "$NET" -v "$ROOT":/w -w /w python:3.12-slim \
-  sh -c "pip -q install sqlalchemy psycopg geoalchemy2 pgvector && python etl/seed_telemetry.py --database-url \"$DB_URL\""
+docker run --rm --network "$NET" -e DB_URL="$DB_URL" -v "$ROOT":/w -w /w python:3.12-slim \
+  sh -c 'pip -q install "sqlalchemy" "psycopg[binary]" geoalchemy2 pgvector && python etl/seed_telemetry.py --database-url "$DB_URL"'
+
+# Notes from the first production run (2026-10-30): psycopg needs the
+# [binary] extra in the slim image (no libpq); the DSN travels via -e so no
+# secret lands on a command line; image pull + pip install happen per run.
 
 # Re-confirm the DSN form (postgresql+psycopg://… vs postgresql://…) against
 # seed_telemetry.py's parser before the first production run — adjust this
