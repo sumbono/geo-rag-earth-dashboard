@@ -19,7 +19,8 @@
 - CSP constraint: `img-src` allows only self + ESRI + OSM — **no external badge/shield images**; badges are text/CSS chips; GitHub links are `href`s.
 - URL sync uses `history.replaceState` only (never `pushState` — Back must not walk search states).
 - Mode derivation (shared by Tasks 2 and 3): `mode = currentQuery !== "" ? "ranked" : "recency"` — text/suggestion searches set `currentQuery` via `handleSearchStart`; bbox-only draws do not (verified: `handleBboxResults` never touches `currentQuery`).
-- Test floors after every task: `npx vitest run`, `npx tsc --noEmit`, `npx eslint .` (0 errors, 51 pre-existing warnings).
+- Test floors after every task: `npx vitest run`, `npx tsc --noEmit`, `npx eslint .` (0 errors, **54** pre-existing warnings — re-baselined by triple-pass verification 2026-11-04).
+- Router mocks: `vitest.setup.ts` gains a global `vi.mock("next/navigation", …)` (Task 1) — `AppHeader.useRouter` throws in Next 15 without router context, and 8 suites render `DashboardPage` unmocked today (they pass only because nothing in the unit-test tree calls `useRouter` — `AuthGuard` lives in `dashboard/layout.tsx`, which tests bypass). File-level mocks in `authguard.test.tsx`/`login.test.tsx` keep precedence over the setup mock.
 - Logout semantics: `POST /api/auth/logout` (clears refresh row + cookies server-side) **then** `router.replace("/login")` — on POST failure still route to login (session may already be dead).
 - Demo creds stay public; no auth-model changes.
 
@@ -27,7 +28,7 @@
 
 1. **URL restore loops / double-fires.** A `?q=` restore must run the search exactly once and `replaceState` must not re-trigger the restore effect. → Task 5 pins a run-once ref guard and asserts a single `POST /api/search/vector`.
 2. **Bbox restore double-fire.** Restoring `?bbox=` draws the rectangle AND searches exactly once — `mapRef.setRectangle` is visual only; the search comes solely from `runBbox`. → Task 5 test asserts one `POST /api/search/bbox`.
-3. **Weak-match false alarms.** A legitimate-but-hard query must get an *invitation* to refine, not a failure verdict; threshold is one named constant. → Task 2 tests pin 0.27 (banner), 0.45 (no banner), and recency suppression.
+3. **Weak-match false alarms.** A legitimate-but-hard query must get an *invitation* to refine, not a failure verdict — and the floor must sit in the observed band: junk tops **0.27**, the good on-theme query tops **0.30** (audit §3 evidence), so `WEAK_MATCH_FLOOR = 0.28` (strictly above junk, ≤ good). → Task 2 tests pin 0.27 → banner, **0.30 → no banner (good-query regression pin)**, 0.45 → no banner, recency → suppressed.
 4. **Clipboard availability.** `navigator.clipboard` can be absent (insecure context/jsdom). → Task 5: optional chaining + visible fallback status showing the URL.
 5. **Share/restore must not break existing counts.** `replaceState` adds no fetches; restore adds fetches only when params exist. → Task 5 tests: no params → zero extra requests; `?q=` → exactly one search POST.
 
@@ -38,12 +39,25 @@
 **Files:**
 - Create: `apps/web/components/AppHeader.tsx`
 - Create: `apps/web/__tests__/app-header.test.tsx`
+- Modify: `apps/web/vitest.setup.ts` (global `next/navigation` mock — see Step 0)
 - Modify: `apps/web/app/dashboard/page.tsx` (render header above `<SearchBar>`)
 - Modify: `apps/web/app/globals.css` (`.dash-header` layout)
 
 **Interfaces:**
 - Consumes: `apiFetch` from `lib/api`; `useRouter` from `next/navigation` (pattern: `AuthGuard.tsx`, `login/page.tsx:17,33`).
 - Produces: `<AppHeader />` with optional `onShare?: () => void`: wordmark link `Geo-RAG Earth Dashboard` → `/`, GitHub link → `https://github.com/sumbono/geo-rag-earth-dashboard`, `Share` ghost button (rendered only when `onShare` provided — Task 5 wires it), `Log out` ghost button.
+
+- [ ] **Step 0: Global router mock (required before AppHeader renders anywhere).** Next 15's `useRouter()` throws "invariant expected app router to be mounted" without context, and **8 suites render `DashboardPage` unmocked today** (search_ui, bbox_draw, dashboard-styles, detail_panel, guidance, interactive-info, telemetry_chart, view3d — they pass only because nothing in that tree calls `useRouter` yet; `AuthGuard` lives in `dashboard/layout.tsx`, which unit tests bypass). Add to `apps/web/vitest.setup.ts` (existing file-level mocks in `authguard.test.tsx`/`login.test.tsx` keep precedence over the setup mock):
+
+```ts
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: vi.fn(), push: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
+  usePathname: () => "/dashboard",
+  useSearchParams: () => new URLSearchParams(),
+}));
+```
+
+(`vitest.setup.ts` needs `import { vi } from "vitest";` if not already imported.) **Verify immediately:** `npx vitest run` → all 119 existing tests still green — the first full run after this step is the conflict check (file-level vs setup-level mock coexistence).
 
 - [ ] **Step 1: Write the failing test** (`apps/web/__tests__/app-header.test.tsx`):
 
@@ -155,27 +169,37 @@ export default function AppHeader({ onShare }: { onShare?: () => void }) {
 **Files:**
 - Modify: `apps/web/components/ResultsPanel.tsx` (new `mode` prop, banner, caption switch)
 - Modify: `apps/web/app/dashboard/page.tsx` (derive + pass `mode`)
+- Modify: `apps/web/app/globals.css` (`.weak-match` styles — tokens only)
 - Modify: `apps/web/__tests__/results-panel.test.tsx`
 
 **Interfaces:**
 - Consumes: `SearchResult[]`; page state `currentQuery` (`""` ⇒ recency).
-- Produces: `ResultsPanelProps.mode?: "ranked" | "recency"` (default `"ranked"` — existing renders stay valid). Ranked + `results[0].score < WEAK_MATCH_FLOOR` → `<p role="status" data-testid="weak-match-notice">Low-confidence matches (top {score}) — this query may be outside the indexed imagery. Try describing a scene, e.g. “turquoise water near a reef”.</p>`; recency → caption `Newest first in this area — no text query yet.` and no notice (scores are not cosine). `const WEAK_MATCH_FLOOR = 0.35;` module const.
+- Produces: `ResultsPanelProps.mode?: "ranked" | "recency"` (default `"ranked"` — existing renders stay valid). Ranked + `results[0].score < WEAK_MATCH_FLOOR` → `<p role="status" data-testid="weak-match-notice">Low-confidence matches (top {results[0].score.toFixed(2)}) — this query may be outside the indexed imagery. Try describing a scene, e.g. “turquoise water near a reef”.</p>`; recency → caption `Newest first in this area — no text query yet.` and no notice (scores are not cosine). `const WEAK_MATCH_FLOOR = 0.28;` module const — **calibrated to the observed band**: junk-query tops 0.27, the good on-theme query tops 0.30 (audit evidence), so the floor sits strictly above junk and at/below good (`0.27 < 0.28 ≤ 0.30`); the dataset is a fixed 100-chip sample, so a data-pinned constant is defensible — keep the tuning rationale in the const's comment.
 
 - [ ] **Step 1: Failing tests** (append to `results-panel.test.tsx`):
 
 ```tsx
-it("shows a weak-match notice when the top ranked score is below the floor", () => {
-  render(<ResultsPanel results={TWO} onPick={() => {}} />); // TWO[0].score = 0.91
+it("shows no weak-match notice for a healthy top score (TWO[0] = 0.91)", () => {
+  render(<ResultsPanel results={TWO} onPick={() => {}} />);
   expect(screen.queryByTestId("weak-match-notice")).not.toBeInTheDocument();
 });
 
-it("weak-match notice appears for junk-query scores and stays absent at 0.45", () => {
+it("shows the notice for junk-query scores (0.27 — audit-observed band)", () => {
   const weak: SearchResult[] = TWO.map((r, i) => ({ ...r, score: 0.27 - i * 0.01 }));
   render(<ResultsPanel results={weak} onPick={() => {}} />);
   expect(screen.getByTestId("weak-match-notice")).toHaveTextContent(/low-confidence/i);
+  expect(screen.getByTestId("weak-match-notice")).toHaveTextContent("top 0.27"); // toFixed(2) pin
 });
 
-it("no notice when the top score clears the floor", () => {
+it("shows NO notice at 0.30 — the good on-query top score (regression pin)", () => {
+  // Audit evidence: "turquoise coastal water" tops at 0.30. A floor above
+  // this would banner every real query — the exact failure this pin prevents.
+  const good: SearchResult[] = TWO.map((r, i) => ({ ...r, score: 0.3 - i * 0.01 }));
+  render(<ResultsPanel results={good} onPick={() => {}} />);
+  expect(screen.queryByTestId("weak-match-notice")).not.toBeInTheDocument();
+});
+
+it("shows NO notice at 0.45 (well clear of the floor)", () => {
   const ok: SearchResult[] = TWO.map((r, i) => ({ ...r, score: 0.45 - i * 0.01 }));
   render(<ResultsPanel results={ok} onPick={() => {}} />);
   expect(screen.queryByTestId("weak-match-notice")).not.toBeInTheDocument();
@@ -190,7 +214,7 @@ it("recency mode swaps the caption and never shows the weak-match notice", () =>
 ```
 
 - [ ] **Step 2: Run → FAIL.** `npx vitest run __tests__/results-panel.test.tsx`
-- [ ] **Step 3: Implement:** `mode` prop default `"ranked"`; caption switches on mode; banner after the caption `<p>` when `mode === "ranked" && results.length > 0 && results[0].score < WEAK_MATCH_FLOOR`; `.weak-match` CSS with `var(--color-ink-soft)` + `var(--space-2xs)` tokens. Page passes `mode={currentQuery !== "" ? "ranked" : "recency"}`.
+- [ ] **Step 3: Implement:** `mode` prop default `"ranked"`; caption switches on mode; banner after the caption `<p>` when `mode === "ranked" && results.length > 0 && results[0].score < WEAK_MATCH_FLOOR`, copy interpolating `results[0].score.toFixed(2)` (never raw float); `.weak-match` CSS in `globals.css` with `var(--color-ink-soft)` + `var(--space-2xs)` tokens. Page passes `mode={currentQuery !== "" ? "ranked" : "recency"}`.
 - [ ] **Step 4: Re-run tests + full gates** → green.
 - [ ] **Step 5: Commit:** `git commit -am "feat: weak-match notice and mode-aware results caption"`.
 
@@ -226,7 +250,7 @@ describe("EmptyState hint (P1)", () => {
 });
 ```
 
-- [ ] **Step 2: Run → FAIL.** **Step 3: Implement** optional prop + conditional `<p data-testid="empty-hint">` (tokens: `var(--color-ink-soft)`, `var(--text-sm)`). **Step 4: Page wiring** at the `searched ? (loading ? null : <EmptyState …>)` branch (`dashboard/page.tsx:262-266` region).
+- [ ] **Step 2: Run → FAIL.** **Step 3: Implement** optional prop + conditional `<p data-testid="empty-hint">` (tokens: `var(--color-ink-soft)`, `var(--text-sm)`). **Step 4: Page wiring** at the `searched ? (loading ? null : <EmptyState …>)` branch (`dashboard/page.tsx:273-276` — verified by triple-pass; the hint rides inside EmptyState so the Issue-8 loading gate prevents any mid-flight flash).
 - [ ] **Step 5: Gates → green; commit:** `git commit -am "feat: empty-area hint ties zero-results to the coverage outline"`.
 
 ---
@@ -315,9 +339,14 @@ describe("urlState (P1 shareability)", () => {
 
 - [ ] **Step 2: Run → FAIL** (module missing). **Step 3: Implement `lib/urlState.ts`** (~40 lines; `Number.isFinite` guards both directions; parse via `URLSearchParams`).
 
-- [ ] **Step 4: Failing page-level test** (append to `search_ui.test.tsx`, using its existing `stubFetch` + `render(<DashboardPage/>)` harness — this suite does NOT mock `next/navigation`, matching current env):
+- [ ] **Step 4: Failing page-level test** (append to `search_ui.test.tsx`, using its existing `stubFetch` + `render(<DashboardPage/>)` harness; the `next/navigation` mock comes **globally from `vitest.setup.ts` (Task 1 Step 0)** — no per-file mock needed):
 
 ```tsx
+afterEach(() => {
+  // A failed assertion must not leak ?q= into later tests in this file.
+  window.history.replaceState(null, "", "/dashboard");
+});
+
 it("restores ?q= on mount with exactly one search POST (P1)", async () => {
   window.history.replaceState(null, "", "/dashboard?q=turquoise%20water");
   stubFetch(200, { results: [] });
@@ -326,7 +355,6 @@ it("restores ?q= on mount with exactly one search POST (P1)", async () => {
     const searchCalls = fetchMock.mock.calls.filter(([u]) => String(u).includes("/api/search/vector"));
     expect(searchCalls).toHaveLength(1);
   });
-  window.history.replaceState(null, "", "/dashboard");
 });
 ```
 
@@ -335,6 +363,7 @@ it("restores ?q= on mount with exactly one search POST (P1)", async () => {
 ```tsx
 // Restore ONCE (run-once ref — Review Focus #1)
 const restoredRef = useRef(false);
+const pendingTileRef = useRef<string | null>(null); // applied when results land
 useEffect(() => {
   if (restoredRef.current) return;
   restoredRef.current = true;
@@ -344,13 +373,20 @@ useEffect(() => {
     void handleSuggest(s.q);            // complete text-search path
   }
   if (s.bbox) {
-    mapRef.current?.setRectangle(s.bbox);   // visual only
-    bboxDrawRef.current?.runBbox?.(s.bbox); // the ONE search POST (Review Focus #2)
+    // runBbox emits onRectangle → map draws it; the ONE search POST is runBbox's.
+    bboxDrawRef.current?.runBbox?.(s.bbox);
   }
-  if (s.tile) setSelectedId(s.tile);        // opens only if results contain it (selectedTile lookup is null-safe)
+  if (s.tile) pendingTileRef.current = s.tile; // NOT setSelectedId here:
+  // handleResults() calls setSelectedId(null) when the restore search lands
+  // (page.tsx:110), which would wipe an eagerly-set selection; and a tile-only
+  // URL fetches nothing, so selection must wait for results either way.
 }, []);
+```
 
-// Sync AFTER user actions (skip until first search — no URL noise pre-search)
+  - **Pending-tile application** — inside `handleResults(next)` after `setResults(next)`: `if (pendingTileRef.current && next.some((r) => r.id === pendingTileRef.current)) { setSelectedId(pendingTileRef.current); pendingTileRef.current = null; }`. A tile id absent from the results is dropped silently (URL sync then clears it — correct: the tile is not in this result set). Tile-only URLs with no `q`/`bbox` fetch nothing and open nothing — documented behavior, not a defect.
+  - **Sync effect:**
+
+```tsx
 useEffect(() => {
   if (!searched) return;
   replaceUrlState({
@@ -361,8 +397,9 @@ useEffect(() => {
 }, [searched, currentQuery, selectedId, results]);
 ```
 
-  - `BboxDraw`: add `runBbox` via `useImperativeHandle`: `(bbox) => { void runSearch(bbox); onRectangle(bbox); }` — **one** search.
-  - **Share:** dashboard passes `onShare` to AppHeader: `replaceUrlState(currentState)` then `navigator.clipboard?.writeText(window.location.href)` → `shareStatus` state rendered as `<p role="status">{shareStatus}</p>` next to the header (AppHeader stays dumb). Missing clipboard → `shareStatus = "Copy from the address bar: " + window.location.href` (Review Focus #4).
+  - `BboxDraw`: add `runBbox` via `useImperativeHandle`: `(bbox) => { void runSearch(bbox); onRectangle(bbox); }` — **one** search (restore's `onRectangle` draws the rect; no separate `mapRef.setRectangle` needed).
+  - **Rectangle clear must clear the URL too (hardening):** in `handleToggleRect`, when disarming (`next === null`), also `lastRectRef.current = null` — otherwise a stale `?bbox=` lingers after re-arm or a text-only search.
+  - **Share:** dashboard passes `onShare` to AppHeader: `replaceUrlState(currentState)` then `navigator.clipboard?.writeText(window.location.href)` → `shareStatus` state. Render `<p role="status">{shareStatus}</p>` **only when `shareStatus !== null`** — an unconditional status node breaks strict `getByRole("status")` queries in `search_ui.test.tsx:246` and `telemetry_chart.test.tsx:137`, and empty nodes still match. Missing clipboard → `shareStatus = "Copy from the address bar: " + window.location.href` (Review Focus #4). AppHeader stays dumb (it only calls `onShare`).
   - No-params guard: `searched === false` + empty params → sync no-ops, restore no-ops → zero extra fetches (Review Focus #5).
 
 - [ ] **Step 7: Run page test + full gates → green.**
@@ -381,3 +418,14 @@ useEffect(() => {
 - Polygon URL restore (`?poly=`) — deferred: ring encoding + `runPolygon` exposure for low share-value vs effort.
 - Demo video asset — owner records a 60–90 s walkthrough; slot reserved in Task 4's section comment, not built here.
 - Architecture depth page (audit F3) — Sprint B, separate plan.
+
+## Triple-pass verification record
+
+Methodology: `/home/bono/portfolio/TRIPLE_PASS_VERIFICATION.md` (adapted for a web-only 5-task plan). Verifier: independent reviewer subagent, 2026-11-04, every check cited file:line against the worktree (baseline re-run: 22 files / 119 tests green, tsc clean, eslint 0 errors / 54 warnings).
+
+- **Pass 1:** mode derivation ✅ (handleSearchStart is the sole writer; blank submits impossible); runBbox ✅ (close-path state reset makes a mount-time restore coherent); router style ✅; CSP claim ✅ (next.config.ts:50 img-src); Task 4 anchors ✅. **Two ❌ defects:** (a) `useRouter` in AppHeader throws in Next 15 without router context → 8 DashboardPage suites break (AuthGuard is in layout.tsx, bypassed by unit tests — the suites pass today only because nothing calls `useRouter` in-tree); (b) `WEAK_MATCH_FLOOR = 0.35` mis-calibrated — the audit's own good-query evidence tops at 0.30, so the banner would fire on every real query.
+- **Pass 2:** logout-vs-silent-refresh ✅ (logout deliberately not in NO_SILENT_REFRESH; dead session → catch → replace); bbox-in-URL timing ✅ (ref set before setResults re-fires the effect); role=status vs e2e alert assert ✅; jsdom URL APIs ✅. **Two ❌ defects:** (c) `?tile=` restore dead-on-arrival — `handleResults` calls `setSelectedId(null)` (page.tsx:110), wiping an eager selection; tile-only URLs fetch nothing; (d) unconditional share-status `<p role="status">` breaks strict `getByRole("status")` at search_ui.test.tsx:246 and telemetry_chart.test.tsx:137.
+- **Pass 3:** web-only claim ✅ (no API/DB/route changes; check-live's 12 paths untouched); optional-props-only naming ✅ (non-breaking); blast radius 🟡 — `vitest.setup.ts` + 8 suites were undeclared; gate count stale (51→54); stale line anchors; Task 2 missing globals.css in Files.
+- **Verdict: solid with four required fixes — all11 revisions applied to this document:** (1) floor → 0.28 with 0.27/0.30/0.45 pins incl. the good-query regression test; (2) Task 1 Step 0 global router mock + immediate full-suite check; (3) pending-tile ref applied in `handleResults`; (4) share-status rendered only when set; plus `toFixed(2)` copy, globals.css in Files, anchor 273-276, test rename, afterEach URL cleanup, 54-warnings baseline, and hardening (clear `lastRectRef` on rect disarm; drop redundant `setRectangle`).
+- **Lowest-risk execution-time check:** the first full `npx vitest run` after Task 1 Step 0 — proves the setup-level router mock coexists with the file-level mocks in `authguard.test.tsx`/`login.test.tsx` (file-level should win).
+- **Status: waiting for your approval to proceed** — this plan is never auto-executed.
