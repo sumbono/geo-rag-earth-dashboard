@@ -1,0 +1,383 @@
+# Portfolio P0/P1 Fixes — Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Fix the six P0/P1 problems from the product-owner audit — app chrome/logout, junk-query confidence gap, recency-caption mislabel, shareable URLs, landing engineering showcase, empty-area explanation — all ranked for the portfolio lens (fullstack + DevOps + architecture showcase).
+
+**Architecture:** Entirely **web-only** (zero API/schema changes): a new `AppHeader` (wordmark/GitHub/Share/Log out) on the dashboard; a `mode` prop on `ResultsPanel` ("ranked" | "recency") driving a weak-match banner and a mode-correct caption; an optional `hint` on `EmptyState` for spatial misses; a landing "How it's built" band built from CSS chips (CSP forbids external badge images); and a pure `lib/urlState.ts` (encode/parse `?q=&bbox=&tile=`) with `history.replaceState` sync plus a Share button. Bbox restore rides a new optional `runBbox` method on `BboxDrawHandle`.
+
+**Tech Stack:** Next.js App Router (client components), MapLibre handles already on the page, vitest + Testing Library, `next/navigation` `useRouter` (same pattern as `AuthGuard`/`login`).
+
+**Spec:** `/home/bono/portfolio/geo-product-audit-2026-11-04/product-owner-audit.md` (§3 problems 1–6, §4 F1/F4). Repo at `/home/bono/portfolio/geo-rag-earth-dashboard`; implement from a branch cut at `main` (post PRs #5/#6 and the ops fix).
+
+**Planning date:** 2026-11-04. **Plan file follows this repo's convention** (`docs/superpowers/plans/YYYY-MM-DD-*.md` — see `2026-10-08-ui-redesign.md`).
+
+## Global Constraints
+
+- Web-only: no FastAPI, no DB, no migration, no new npm dependencies.
+- Design system: `var(--color-*)` / `var(--space-*)` tokens only; no raw hex; classes `button` / `button--ghost` / `button--primary`.
+- CSP constraint: `img-src` allows only self + ESRI + OSM — **no external badge/shield images**; badges are text/CSS chips; GitHub links are `href`s.
+- URL sync uses `history.replaceState` only (never `pushState` — Back must not walk search states).
+- Mode derivation (shared by Tasks 2 and 3): `mode = currentQuery !== "" ? "ranked" : "recency"` — text/suggestion searches set `currentQuery` via `handleSearchStart`; bbox-only draws do not (verified: `handleBboxResults` never touches `currentQuery`).
+- Test floors after every task: `npx vitest run`, `npx tsc --noEmit`, `npx eslint .` (0 errors, 51 pre-existing warnings).
+- Logout semantics: `POST /api/auth/logout` (clears refresh row + cookies server-side) **then** `router.replace("/login")` — on POST failure still route to login (session may already be dead).
+- Demo creds stay public; no auth-model changes.
+
+## Review Focus (failure modes the spec implies, pinned to owning tasks)
+
+1. **URL restore loops / double-fires.** A `?q=` restore must run the search exactly once and `replaceState` must not re-trigger the restore effect. → Task 5 pins a run-once ref guard and asserts a single `POST /api/search/vector`.
+2. **Bbox restore double-fire.** Restoring `?bbox=` draws the rectangle AND searches exactly once — `mapRef.setRectangle` is visual only; the search comes solely from `runBbox`. → Task 5 test asserts one `POST /api/search/bbox`.
+3. **Weak-match false alarms.** A legitimate-but-hard query must get an *invitation* to refine, not a failure verdict; threshold is one named constant. → Task 2 tests pin 0.27 (banner), 0.45 (no banner), and recency suppression.
+4. **Clipboard availability.** `navigator.clipboard` can be absent (insecure context/jsdom). → Task 5: optional chaining + visible fallback status showing the URL.
+5. **Share/restore must not break existing counts.** `replaceState` adds no fetches; restore adds fetches only when params exist. → Task 5 tests: no params → zero extra requests; `?q=` → exactly one search POST.
+
+---
+
+### Task 1: App header with Share slot + Log out (P0-1)
+
+**Files:**
+- Create: `apps/web/components/AppHeader.tsx`
+- Create: `apps/web/__tests__/app-header.test.tsx`
+- Modify: `apps/web/app/dashboard/page.tsx` (render header above `<SearchBar>`)
+- Modify: `apps/web/app/globals.css` (`.dash-header` layout)
+
+**Interfaces:**
+- Consumes: `apiFetch` from `lib/api`; `useRouter` from `next/navigation` (pattern: `AuthGuard.tsx`, `login/page.tsx:17,33`).
+- Produces: `<AppHeader />` with optional `onShare?: () => void`: wordmark link `Geo-RAG Earth Dashboard` → `/`, GitHub link → `https://github.com/sumbono/geo-rag-earth-dashboard`, `Share` ghost button (rendered only when `onShare` provided — Task 5 wires it), `Log out` ghost button.
+
+- [ ] **Step 1: Write the failing test** (`apps/web/__tests__/app-header.test.tsx`):
+
+```tsx
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const replace = vi.fn();
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace, push: vi.fn() }),
+}));
+
+import AppHeader from "../components/AppHeader";
+
+describe("AppHeader (P0 chrome)", () => {
+  beforeEach(() => replace.mockClear());
+
+  it("renders wordmark link home, GitHub link, and logout button", () => {
+    render(<AppHeader />);
+    expect(screen.getByRole("link", { name: /geo-rag earth dashboard/i })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "GitHub" })).toHaveAttribute(
+      "href",
+      "https://github.com/sumbono/geo-rag-earth-dashboard",
+    );
+    expect(screen.getByRole("button", { name: "Log out" })).toBeInTheDocument();
+  });
+
+  it("POSTs /api/auth/logout then routes to /login", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetchSpy);
+    render(<AppHeader />);
+    fireEvent.click(screen.getByRole("button", { name: "Log out" }));
+    await waitFor(() =>
+      expect(fetchSpy).toHaveBeenCalledWith(
+        "/api/auth/logout",
+        expect.objectContaining({ method: "POST", credentials: "include" }),
+      ),
+    );
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/login"));
+    vi.unstubAllGlobals();
+  });
+
+  it("still routes to /login when the logout POST fails", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
+    render(<AppHeader />);
+    fireEvent.click(screen.getByRole("button", { name: "Log out" }));
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/login"));
+    vi.unstubAllGlobals();
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify failure:** `npx vitest run __tests__/app-header.test.tsx` → FAIL (module not found).
+- [ ] **Step 3: Implement `AppHeader.tsx`:**
+
+```tsx
+"use client";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { apiFetch } from "../lib/api";
+
+export default function AppHeader({ onShare }: { onShare?: () => void }) {
+  const router = useRouter();
+  async function handleLogout() {
+    try {
+      await apiFetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      // session may already be dead — route to login either way
+    }
+    router.replace("/login");
+  }
+  return (
+    <header className="dash-header">
+      <Link href="/" className="dash-header__brand">Geo-RAG Earth Dashboard</Link>
+      <nav className="dash-header__actions">
+        <a className="button button--ghost" href="https://github.com/sumbono/geo-rag-earth-dashboard">GitHub</a>
+        {onShare && (
+          <button type="button" className="button button--ghost" data-testid="share-button" onClick={onShare}>
+            Share
+          </button>
+        )}
+        <button type="button" className="button button--ghost" onClick={handleLogout}>Log out</button>
+      </nav>
+    </header>
+  );
+}
+```
+
+- [ ] **Step 4: Wire + style:** dashboard `page.tsx` — render `<AppHeader />` immediately above `<SearchBar …>` inside `<main>`; `globals.css`:
+
+```css
+.dash-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-2xs);
+}
+.dash-header__actions { display: flex; gap: var(--space-2xs); align-items: center; }
+```
+
+- [ ] **Step 5: Full gates:** `npx vitest run && npx tsc --noEmit && npx eslint .` → green.
+- [ ] **Step 6: Commit:** `git add apps/web && git commit -m "feat: app header with logout (P0 chrome)"`.
+
+---
+
+### Task 2: Mode-aware results framing — weak-match banner + recency caption (P0-2 + P1-5)
+
+**Files:**
+- Modify: `apps/web/components/ResultsPanel.tsx` (new `mode` prop, banner, caption switch)
+- Modify: `apps/web/app/dashboard/page.tsx` (derive + pass `mode`)
+- Modify: `apps/web/__tests__/results-panel.test.tsx`
+
+**Interfaces:**
+- Consumes: `SearchResult[]`; page state `currentQuery` (`""` ⇒ recency).
+- Produces: `ResultsPanelProps.mode?: "ranked" | "recency"` (default `"ranked"` — existing renders stay valid). Ranked + `results[0].score < WEAK_MATCH_FLOOR` → `<p role="status" data-testid="weak-match-notice">Low-confidence matches (top {score}) — this query may be outside the indexed imagery. Try describing a scene, e.g. “turquoise water near a reef”.</p>`; recency → caption `Newest first in this area — no text query yet.` and no notice (scores are not cosine). `const WEAK_MATCH_FLOOR = 0.35;` module const.
+
+- [ ] **Step 1: Failing tests** (append to `results-panel.test.tsx`):
+
+```tsx
+it("shows a weak-match notice when the top ranked score is below the floor", () => {
+  render(<ResultsPanel results={TWO} onPick={() => {}} />); // TWO[0].score = 0.91
+  expect(screen.queryByTestId("weak-match-notice")).not.toBeInTheDocument();
+});
+
+it("weak-match notice appears for junk-query scores and stays absent at 0.45", () => {
+  const weak: SearchResult[] = TWO.map((r, i) => ({ ...r, score: 0.27 - i * 0.01 }));
+  render(<ResultsPanel results={weak} onPick={() => {}} />);
+  expect(screen.getByTestId("weak-match-notice")).toHaveTextContent(/low-confidence/i);
+});
+
+it("no notice when the top score clears the floor", () => {
+  const ok: SearchResult[] = TWO.map((r, i) => ({ ...r, score: 0.45 - i * 0.01 }));
+  render(<ResultsPanel results={ok} onPick={() => {}} />);
+  expect(screen.queryByTestId("weak-match-notice")).not.toBeInTheDocument();
+});
+
+it("recency mode swaps the caption and never shows the weak-match notice", () => {
+  const recency = TWO.map((r) => ({ ...r, score: 0 }));
+  render(<ResultsPanel results={recency} onPick={() => {}} mode="recency" />);
+  expect(screen.getByTestId("score-caption")).toHaveTextContent(/newest first in this area/i);
+  expect(screen.queryByTestId("weak-match-notice")).not.toBeInTheDocument();
+});
+```
+
+- [ ] **Step 2: Run → FAIL.** `npx vitest run __tests__/results-panel.test.tsx`
+- [ ] **Step 3: Implement:** `mode` prop default `"ranked"`; caption switches on mode; banner after the caption `<p>` when `mode === "ranked" && results.length > 0 && results[0].score < WEAK_MATCH_FLOOR`; `.weak-match` CSS with `var(--color-ink-soft)` + `var(--space-2xs)` tokens. Page passes `mode={currentQuery !== "" ? "ranked" : "recency"}`.
+- [ ] **Step 4: Re-run tests + full gates** → green.
+- [ ] **Step 5: Commit:** `git commit -am "feat: weak-match notice and mode-aware results caption"`.
+
+---
+
+### Task 3: Empty-area explanation hint (P1-6)
+
+**Files:**
+- Modify: `apps/web/components/EmptyState.tsx` (optional `hint?: string`)
+- Modify: `apps/web/app/dashboard/page.tsx` (pass hint when spatial)
+- Create: `apps/web/__tests__/empty-state.test.tsx`
+
+**Interfaces:**
+- Consumes: same `mode` derivation as Task 2 (`currentQuery === ""` after a spatial-only search).
+- Produces: `EmptyStateProps.hint?: string` → `<p data-testid="empty-hint">{hint}</p>` above suggestions (heading unchanged); dashboard passes `currentQuery === "" ? "Nothing indexed in this area — the dashed outline on the map shows what's searchable." : undefined`.
+
+- [ ] **Step 1: Failing test** (new file):
+
+```tsx
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+import EmptyState from "../components/EmptyState";
+
+describe("EmptyState hint (P1)", () => {
+  it("shows the coverage hint when provided", () => {
+    render(<EmptyState onSuggest={() => {}} hint="Nothing indexed in this area" />);
+    expect(screen.getByTestId("empty-hint")).toHaveTextContent("Nothing indexed in this area");
+  });
+  it("renders plain suggestions without a hint by default", () => {
+    render(<EmptyState onSuggest={() => {}} />);
+    expect(screen.queryByTestId("empty-hint")).not.toBeInTheDocument();
+  });
+});
+```
+
+- [ ] **Step 2: Run → FAIL.** **Step 3: Implement** optional prop + conditional `<p data-testid="empty-hint">` (tokens: `var(--color-ink-soft)`, `var(--text-sm)`). **Step 4: Page wiring** at the `searched ? (loading ? null : <EmptyState …>)` branch (`dashboard/page.tsx:262-266` region).
+- [ ] **Step 5: Gates → green; commit:** `git commit -am "feat: empty-area hint ties zero-results to the coverage outline"`.
+
+---
+
+### Task 4: Landing engineering band (P0-3)
+
+**Files:**
+- Modify: `apps/web/app/page.tsx` (new `<section>` between `.hero` (closes ~line 74) and `.preview` (line ~77))
+- Modify: `apps/web/app/globals.css` (`.stack` band + `.stack__chips` + `.stack__chip`)
+- Modify: `apps/web/__tests__/landing.test.tsx`
+
+**Interfaces:**
+- Consumes: nothing (copy + links only).
+- Produces: `<section aria-label="How it's built">` with pitch `Built end-to-end — FastAPI · PostGIS + pgvector · RemoteCLIP embeddings · Next.js · MapLibre GL · Docker · GitHub Actions`, `<div data-testid="stack-chips">` with chips `PostGIS/pgvector`, `RemoteCLIP`, `FastAPI`, `Next.js`, `MapLibre`, `Docker`, `CI + ~250 tests`, and `<a href={repo}>Source & architecture →</a>`. **No external images** (CSP). HTML comment reserves a demo-video slot for the owner's future asset.
+
+- [ ] **Step 1: Failing test** (append to `landing.test.tsx`):
+
+```tsx
+it("shows the engineering band (P0 showcase)", () => {
+  render(<Page />);
+  const chips = screen.getByTestId("stack-chips");
+  expect(chips).toHaveTextContent("PostGIS/pgvector");
+  expect(chips).toHaveTextContent("RemoteCLIP");
+  expect(chips).toHaveTextContent("CI + ~250 tests");
+  expect(screen.getByRole("region", { name: "How it's built" })).toBeInTheDocument();
+});
+```
+
+- [ ] **Step 2: Run → FAIL.** **Step 3: Implement section** (dark band echoing `.how` for visual rhythm; chips):
+
+```css
+.stack__chips { display: flex; flex-wrap: wrap; gap: var(--space-2xs); }
+.stack__chip {
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-control);
+  padding: var(--space-2xs) var(--space-xs);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+```
+
+- [ ] **Step 4: Gates → green; commit:** `git commit -am "feat: landing engineering band for the 60-second skim"`.
+
+---
+
+### Task 5: URL state + Share (P1-4) — `?q=`, `?bbox=`, `?tile=`
+
+**Files:**
+- Create: `apps/web/lib/urlState.ts`
+- Create: `apps/web/__tests__/url-state.test.tsx`
+- Modify: `apps/web/components/BboxDraw.tsx` (add optional `runBbox?: (bbox: Bbox) => void` to `BboxDrawHandle`)
+- Modify: `apps/web/app/dashboard/page.tsx` (restore effect, replaceState sync, `onShare`, share-status `<p role="status">`)
+- Modify: `apps/web/__tests__/search_ui.test.tsx` (URL-restore case)
+
+**Interfaces:**
+- Consumes: `handleSuggest(q)` (complete text-search path, `page.tsx:182-186`), `mapRef.setRectangle`, `bboxDrawRef`, `selectedId`, `currentQuery`, `results`; `BboxDraw` internal `runSearch(bbox)` (`BboxDraw.tsx:160`).
+- Produces (pure):
+  - `parseUrlState(search: string): { q?: string; bbox?: [[number, number], [number, number]]; tile?: string }` — tolerant: bad arity / non-finite / malformed percent-encoding ⇒ part omitted, never throws.
+  - `buildUrlState(state): string` — `""` or `?q=…&bbox=w,s,e,n&tile=…`; drops empty/null; `encodeURIComponent` on `q`; bbox numbers via `Number.isFinite`.
+  - `replaceUrlState(state): void` — `history.replaceState(null, "", buildUrlState(state) || window.location.pathname)`.
+  - `BboxDrawHandle.runBbox?(bbox)` — calls internal `runSearch(bbox)` **once** and emits `onRectangle(bbox)` (visual only on the map side; no second search).
+
+- [ ] **Step 1: Failing pure tests** (`__tests__/url-state.test.tsx`):
+
+```ts
+import { describe, expect, it } from "vitest";
+import { buildUrlState, parseUrlState } from "../lib/urlState";
+
+describe("urlState (P1 shareability)", () => {
+  it("round-trips q, bbox and tile", () => {
+    const built = buildUrlState({ q: "turquoise water", bbox: [[38, 21], [39, 22]], tile: "abc-123" });
+    const parsed = parseUrlState(built);
+    expect(parsed.q).toBe("turquoise water");
+    expect(parsed.bbox).toEqual([[38, 21], [39, 22]]);
+    expect(parsed.tile).toBe("abc-123");
+  });
+
+  it("drops absent parts and tolerates garbage", () => {
+    expect(buildUrlState({ q: "", bbox: null, tile: null })).toBe("");
+    expect(parseUrlState("?bbox=not,numbers")).toEqual({});
+    expect(parseUrlState("?bbox=1,2,3")).toEqual({});
+    expect(() => parseUrlState("?q=%E0%A4%A")).not.toThrow();
+  });
+});
+```
+
+- [ ] **Step 2: Run → FAIL** (module missing). **Step 3: Implement `lib/urlState.ts`** (~40 lines; `Number.isFinite` guards both directions; parse via `URLSearchParams`).
+
+- [ ] **Step 4: Failing page-level test** (append to `search_ui.test.tsx`, using its existing `stubFetch` + `render(<DashboardPage/>)` harness — this suite does NOT mock `next/navigation`, matching current env):
+
+```tsx
+it("restores ?q= on mount with exactly one search POST (P1)", async () => {
+  window.history.replaceState(null, "", "/dashboard?q=turquoise%20water");
+  stubFetch(200, { results: [] });
+  render(<DashboardPage />);
+  await waitFor(() => {
+    const searchCalls = fetchMock.mock.calls.filter(([u]) => String(u).includes("/api/search/vector"));
+    expect(searchCalls).toHaveLength(1);
+  });
+  window.history.replaceState(null, "", "/dashboard");
+});
+```
+
+- [ ] **Step 5: Run → FAIL** (no restore; zero vector calls). **Step 6: Implement page wiring:**
+
+```tsx
+// Restore ONCE (run-once ref — Review Focus #1)
+const restoredRef = useRef(false);
+useEffect(() => {
+  if (restoredRef.current) return;
+  restoredRef.current = true;
+  const s = parseUrlState(window.location.search);
+  if (s.q) {
+    setQuery(s.q);
+    void handleSuggest(s.q);            // complete text-search path
+  }
+  if (s.bbox) {
+    mapRef.current?.setRectangle(s.bbox);   // visual only
+    bboxDrawRef.current?.runBbox?.(s.bbox); // the ONE search POST (Review Focus #2)
+  }
+  if (s.tile) setSelectedId(s.tile);        // opens only if results contain it (selectedTile lookup is null-safe)
+}, []);
+
+// Sync AFTER user actions (skip until first search — no URL noise pre-search)
+useEffect(() => {
+  if (!searched) return;
+  replaceUrlState({
+    q: currentQuery || undefined,
+    bbox: lastRectRef.current,           // set from the onRectangle callback
+    tile: selectedId,
+  });
+}, [searched, currentQuery, selectedId, results]);
+```
+
+  - `BboxDraw`: add `runBbox` via `useImperativeHandle`: `(bbox) => { void runSearch(bbox); onRectangle(bbox); }` — **one** search.
+  - **Share:** dashboard passes `onShare` to AppHeader: `replaceUrlState(currentState)` then `navigator.clipboard?.writeText(window.location.href)` → `shareStatus` state rendered as `<p role="status">{shareStatus}</p>` next to the header (AppHeader stays dumb). Missing clipboard → `shareStatus = "Copy from the address bar: " + window.location.href` (Review Focus #4).
+  - No-params guard: `searched === false` + empty params → sync no-ops, restore no-ops → zero extra fetches (Review Focus #5).
+
+- [ ] **Step 7: Run page test + full gates → green.**
+- [ ] **Step 8: Commit:** `git commit -am "feat: shareable URL state (?q/?bbox/?tile) + Share button"`.
+
+---
+
+## Post-implementation checklist
+
+1. Real browser: header shows Log out; junk query (`xyzzy quantum banana telepathy`) shows the low-confidence notice; bbox-only draw shows "Newest first"; far draw with zero results shows the coverage hint; open a copied `?q=` link in a fresh session → exactly one auto-search; Share copies the URL.
+2. All suites green in CI on the PR; no API/OpenAPI change (`check-live.sh` still expects 12 paths — unaffected).
+3. Landing: engineering band between hero and preview; zero CSP `img-src` violations in console.
+
+## Known deferrals (ledger on execution)
+
+- Polygon URL restore (`?poly=`) — deferred: ring encoding + `runPolygon` exposure for low share-value vs effort.
+- Demo video asset — owner records a 60–90 s walkthrough; slot reserved in Task 4's section comment, not built here.
+- Architecture depth page (audit F3) — Sprint B, separate plan.
