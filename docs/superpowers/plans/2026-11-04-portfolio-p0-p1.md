@@ -383,7 +383,19 @@ useEffect(() => {
 }, []);
 ```
 
-  - **Pending-tile application** — inside `handleResults(next)` after `setResults(next)`: `if (pendingTileRef.current && next.some((r) => r.id === pendingTileRef.current)) { setSelectedId(pendingTileRef.current); pendingTileRef.current = null; }`. A tile id absent from the results is dropped silently (URL sync then clears it — correct: the tile is not in this result set). Tile-only URLs with no `q`/`bbox` fetch nothing and open nothing — documented behavior, not a defect.
+  - **Pending-tile application — APPLY-OR-CLEAR (post-revision desk fix):** inside `handleResults(next)` after `setResults(next)`:
+
+```ts
+if (pendingTileRef.current !== null) {
+  if (next.some((r) => r.id === pendingTileRef.current)) {
+    setSelectedId(pendingTileRef.current);
+  }
+  pendingTileRef.current = null; // clear on MISS too — never stay armed
+}
+```
+
+    Clearing on a miss is mandatory: an uncleared ref would pop the detail open on some *later, unrelated* search that happens to contain the id. A tile id absent from the restore results is dropped (URL sync then clears it — correct: not in this result set). Tile-only URLs with no `q`/`bbox` fetch nothing and open nothing — documented behavior, not a defect.
+  - **Rectangle as STATE, not a ref (post-revision desk fix):** `const [lastRect, setLastRect] = useState<Bbox | null>(null);` — the sync effect must *depend* on the rect so clearing it rewrites the URL. A ref would leave a stale `?bbox=` after disarm (no dep changes → effect never re-runs). Wire: BboxDraw's `onRectangle={(bbox) => { mapRef.current?.setRectangle(bbox); setLastRect(bbox); }}`; `handleToggleRect` disarm branch also calls `setLastRect(null)`.
   - **Sync effect:**
 
 ```tsx
@@ -391,14 +403,13 @@ useEffect(() => {
   if (!searched) return;
   replaceUrlState({
     q: currentQuery || undefined,
-    bbox: lastRectRef.current,           // set from the onRectangle callback
+    bbox: lastRect,                      // state — clearing it re-fires this effect
     tile: selectedId,
   });
-}, [searched, currentQuery, selectedId, results]);
+}, [searched, currentQuery, selectedId, results, lastRect]);
 ```
 
-  - `BboxDraw`: add `runBbox` via `useImperativeHandle`: `(bbox) => { void runSearch(bbox); onRectangle(bbox); }` — **one** search (restore's `onRectangle` draws the rect; no separate `mapRef.setRectangle` needed).
-  - **Rectangle clear must clear the URL too (hardening):** in `handleToggleRect`, when disarming (`next === null`), also `lastRectRef.current = null` — otherwise a stale `?bbox=` lingers after re-arm or a text-only search.
+  - `BboxDraw`: add `runBbox` via `useImperativeHandle`: `(bbox) => { void runSearch(bbox); onRectangle(bbox); }` — **one** search (restore's `onRectangle` draws the rect and sets `lastRect`; no separate `mapRef.setRectangle` needed).
   - **Share:** dashboard passes `onShare` to AppHeader: `replaceUrlState(currentState)` then `navigator.clipboard?.writeText(window.location.href)` → `shareStatus` state. Render `<p role="status">{shareStatus}</p>` **only when `shareStatus !== null`** — an unconditional status node breaks strict `getByRole("status")` queries in `search_ui.test.tsx:246` and `telemetry_chart.test.tsx:137`, and empty nodes still match. Missing clipboard → `shareStatus = "Copy from the address bar: " + window.location.href` (Review Focus #4). AppHeader stays dumb (it only calls `onShare`).
   - No-params guard: `searched === false` + empty params → sync no-ops, restore no-ops → zero extra fetches (Review Focus #5).
 
@@ -426,6 +437,7 @@ Methodology: `/home/bono/portfolio/TRIPLE_PASS_VERIFICATION.md` (adapted for a w
 - **Pass 1:** mode derivation ✅ (handleSearchStart is the sole writer; blank submits impossible); runBbox ✅ (close-path state reset makes a mount-time restore coherent); router style ✅; CSP claim ✅ (next.config.ts:50 img-src); Task 4 anchors ✅. **Two ❌ defects:** (a) `useRouter` in AppHeader throws in Next 15 without router context → 8 DashboardPage suites break (AuthGuard is in layout.tsx, bypassed by unit tests — the suites pass today only because nothing calls `useRouter` in-tree); (b) `WEAK_MATCH_FLOOR = 0.35` mis-calibrated — the audit's own good-query evidence tops at 0.30, so the banner would fire on every real query.
 - **Pass 2:** logout-vs-silent-refresh ✅ (logout deliberately not in NO_SILENT_REFRESH; dead session → catch → replace); bbox-in-URL timing ✅ (ref set before setResults re-fires the effect); role=status vs e2e alert assert ✅; jsdom URL APIs ✅. **Two ❌ defects:** (c) `?tile=` restore dead-on-arrival — `handleResults` calls `setSelectedId(null)` (page.tsx:110), wiping an eager selection; tile-only URLs fetch nothing; (d) unconditional share-status `<p role="status">` breaks strict `getByRole("status")` at search_ui.test.tsx:246 and telemetry_chart.test.tsx:137.
 - **Pass 3:** web-only claim ✅ (no API/DB/route changes; check-live's 12 paths untouched); optional-props-only naming ✅ (non-breaking); blast radius 🟡 — `vitest.setup.ts` + 8 suites were undeclared; gate count stale (51→54); stale line anchors; Task 2 missing globals.css in Files.
-- **Verdict: solid with four required fixes — all11 revisions applied to this document:** (1) floor → 0.28 with 0.27/0.30/0.45 pins incl. the good-query regression test; (2) Task 1 Step 0 global router mock + immediate full-suite check; (3) pending-tile ref applied in `handleResults`; (4) share-status rendered only when set; plus `toFixed(2)` copy, globals.css in Files, anchor 273-276, test rename, afterEach URL cleanup, 54-warnings baseline, and hardening (clear `lastRectRef` on rect disarm; drop redundant `setRectangle`).
+- **Verdict: solid with four required fixes — all 11 revisions applied to this document:** (1) floor → 0.28 with 0.27/0.30/0.45 pins incl. the good-query regression test; (2) Task 1 Step 0 global router mock + immediate full-suite check; (3) pending-tile handling in `handleResults`; (4) share-status rendered only when set; plus `toFixed(2)` copy, globals.css in Files, anchor 273-276, test rename, afterEach URL cleanup, 54-warnings baseline, and rectangle-clear handling.
+- **Second desk check (2026-11-05, of the revisions themselves — the verifier could not review post-revision text):** found and fixed **2 defects introduced by the revision round**: (a) pending-tile ref cleared only on hit — an uncleared `?tile=` would pop the detail open on a later unrelated search → now apply-or-clear on first results completion; (b) rect tracked in a **ref** while the sync effect's deps don't change on clear → stale `?bbox=` after disarm → converted to **state** `lastRect` and added to the effect deps (clearing rewrites the URL). Both verified present in the snippets above; no `lastRectRef` remains anywhere in this document.
 - **Lowest-risk execution-time check:** the first full `npx vitest run` after Task 1 Step 0 — proves the setup-level router mock coexists with the file-level mocks in `authguard.test.tsx`/`login.test.tsx` (file-level should win).
 - **Status: waiting for your approval to proceed** — this plan is never auto-executed.
