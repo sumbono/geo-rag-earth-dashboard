@@ -261,6 +261,7 @@ export default function DashboardPage() {
               selectedId={selectedId}
               onPick={setSelectedId}
               onHover={setHoveredId}
+              mode={currentQuery !== "" ? "ranked" : "recency"}
               onExportGeoJSON={() =>
                 downloadText(
                   "search-results.geojson",

@@ -488,6 +488,13 @@ input:focus-visible {
   color: var(--color-ink-soft);
 }
 
+/* --- weak-match notice: junk-query invitation, not a failure verdict --- */
+.weak-match {
+  margin: 0 0 var(--space-2xs);
+  font-size: 0.85rem;
+  color: var(--color-ink-soft);
+}
+
 /* --- data note: honesty labels on simulated/derived series (fix-improve Task 3) --- */
 .data-note {
   margin: 0;
