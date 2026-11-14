@@ -19,7 +19,7 @@
 - CSP constraint: `img-src` allows only self + ESRI + OSM — **no external badge/shield images**; badges are text/CSS chips; GitHub links are `href`s.
 - URL sync uses `history.replaceState` only (never `pushState` — Back must not walk search states).
 - Mode derivation (shared by Tasks 2 and 3): `mode = currentQuery !== "" ? "ranked" : "recency"` — text/suggestion searches set `currentQuery` via `handleSearchStart`; bbox-only draws do not (verified: `handleBboxResults` never touches `currentQuery`).
-- Test floors after every task: `npx vitest run`, `npx tsc --noEmit`, `npx eslint .` (0 errors, **54** pre-existing warnings — re-baselined by triple-pass verification 2026-11-04).
+- Test floors after every task: `npx vitest run`, `npx tsc --noEmit`, `npx eslint .` — gate is **0 errors**; warnings baseline was **54** (re-verified 2026-11-14), but Task 5's run-once restore effect (intentional `[]` deps over `handleSuggest`) and the sync effect may add up to ~2 `react-hooks/exhaustive-deps` warnings — either silence them with a justified `// eslint-disable-next-line react-hooks/exhaustive-deps` (run-once semantics) or accept them; **do not chase an exact warning count**, only "0 errors + no warnings beyond the plan's own additions".
 - Router mocks: `vitest.setup.ts` gains a global `vi.mock("next/navigation", …)` (Task 1) — `AppHeader.useRouter` throws in Next 15 without router context, and 8 suites render `DashboardPage` unmocked today (they pass only because nothing in the unit-test tree calls `useRouter` — `AuthGuard` lives in `dashboard/layout.tsx`, which tests bypass). File-level mocks in `authguard.test.tsx`/`login.test.tsx` keep precedence over the setup mock.
 - Logout semantics: `POST /api/auth/logout` (clears refresh row + cookies server-side) **then** `router.replace("/login")` — on POST failure still route to login (session may already be dead).
 - Demo creds stay public; no auth-model changes.
@@ -27,10 +27,10 @@
 ## Review Focus (failure modes the spec implies, pinned to owning tasks)
 
 1. **URL restore loops / double-fires.** A `?q=` restore must run the search exactly once and `replaceState` must not re-trigger the restore effect. → Task 5 pins a run-once ref guard and asserts a single `POST /api/search/vector`.
-2. **Bbox restore double-fire.** Restoring `?bbox=` draws the rectangle AND searches exactly once — `mapRef.setRectangle` is visual only; the search comes solely from `runBbox`. → Task 5 test asserts one `POST /api/search/bbox`.
+2. **Bbox restore double-fire.** Restoring `?bbox=` draws the rectangle AND searches exactly once — `mapRef.setRectangle` is visual only; the search comes solely from `runBbox`. → Task 5 Step 4(d) pins it: `?bbox=` mount → exactly one `POST /api/search/bbox`.
 3. **Weak-match false alarms.** A legitimate-but-hard query must get an *invitation* to refine, not a failure verdict — and the floor must sit in the observed band: junk tops **0.27**, the good on-theme query tops **0.30** (audit §3 evidence), so `WEAK_MATCH_FLOOR = 0.28` (strictly above junk, ≤ good). → Task 2 tests pin 0.27 → banner, **0.30 → no banner (good-query regression pin)**, 0.45 → no banner, recency → suppressed.
 4. **Clipboard availability.** `navigator.clipboard` can be absent (insecure context/jsdom). → Task 5: optional chaining + visible fallback status showing the URL.
-5. **Share/restore must not break existing counts.** `replaceState` adds no fetches; restore adds fetches only when params exist. → Task 5 tests: no params → zero extra requests; `?q=` → exactly one search POST.
+5. **Share/restore must not break existing counts.** `replaceState` adds no fetches; restore adds fetches only when params exist. → No-params pin: the pre-existing `search_ui` "POSTs the query once" test (`toHaveBeenCalledTimes(1)` on a bare mount) must stay green unchanged; with params → exactly one search POST (Step 4a) / one bbox POST (Step 4d).
 
 ---
 
@@ -303,7 +303,8 @@ it("shows the engineering band (P0 showcase)", () => {
 - Create: `apps/web/__tests__/url-state.test.tsx`
 - Modify: `apps/web/components/BboxDraw.tsx` (add optional `runBbox?: (bbox: Bbox) => void` to `BboxDrawHandle`)
 - Modify: `apps/web/app/dashboard/page.tsx` (restore effect, replaceState sync, `onShare`, share-status `<p role="status">`)
-- Modify: `apps/web/__tests__/search_ui.test.tsx` (URL-restore case)
+- Modify: `apps/web/__tests__/search_ui.test.tsx` (URL-restore + tile cases; extend the existing `afterEach` :143)
+- Modify: `apps/web/__tests__/bbox_draw.test.tsx` (bbox restore + rect-sync cases; extend the existing `afterEach` :166)
 
 **Interfaces:**
 - Consumes: `handleSuggest(q)` (complete text-search path, `page.tsx:182-186`), `mapRef.setRectangle`, `bboxDrawRef`, `selectedId`, `currentQuery`, `results`; `BboxDraw` internal `runSearch(bbox)` (`BboxDraw.tsx:160`).
@@ -341,7 +342,7 @@ describe("urlState (P1 shareability)", () => {
 
 - [ ] **Step 4: Failing page-level tests.** The `next/navigation` mock comes **globally from `vitest.setup.ts` (Task 1 Step 0)** — no per-file mock needed. Three pins (they cover the two desk-fix behaviors from the 2026-11-05 revision — a fix without a failing test is not verified):
 
-**(a) `?q=` restore — exactly one search.** Append to `search_ui.test.tsx` (existing harness: `stubFetch`, `render(<DashboardPage/>)`, `sampleResults` at :95, submit via `submitQuery` at :117). **URL cleanup goes inside the file's EXISTING `afterEach` at :143** (add one line — `window.history.replaceState(null, "", "/dashboard");` — before the global unstub; do not add a second `afterEach` block). Note the existing afterEach also asserts zero console errors/warnings, so these tests must stay console-clean:
+**(a) `?q=` restore — exactly one search.** Append to `search_ui.test.tsx` (existing harness: `stubFetch`, `render(<DashboardPage/>)`, `sampleResults` at :95, submit via `submitQuery` at :128). **URL cleanup goes inside the file's EXISTING `afterEach` at :143** (add one line — `window.history.replaceState(null, "", "/dashboard");` — before the global unstub; do not add a second `afterEach` block). Note the existing afterEach also asserts zero console errors/warnings, so these tests must stay console-clean:
 
 ```tsx
 it("restores ?q= on mount with exactly one search POST (P1)", async () => {
@@ -379,7 +380,9 @@ it("clears a missing restored tile — a later search containing it never opens 
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
   submitQuery("reef"); // second search now CONTAINS ghost-id
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-  await new Promise((r) => setTimeout(r, 0));
+  // Act-covered wait on a real artifact of the 2nd response (the existing
+  // afterEach asserts console-clean — no bare setTimeout outside act()).
+  await screen.findAllByTestId("result-row");
   expect(screen.queryByRole("region", { name: "Tile details" })).not.toBeInTheDocument();
 });
 ```
@@ -404,15 +407,35 @@ it("syncs ?bbox= after a completed draw and drops it on disarm (P1)", async () =
   // (and the URL) carries 38,21,40,23, not the raw click order.
   await waitFor(() => expect(window.location.search).toContain("bbox=38,21,40,23"));
 
-  // Disarm (toggle off) must clear lastRect STATE → the sync effect rewrites
-  // the URL. A ref could never do this (no dep changes) — this pin prevents
-  // regressing to the stale-?bbox= bug.
+  // A completed draw AUTO-disarms (BboxDraw close path calls onToggle at
+  // corner B), so this second toggle RE-ARMS → fresh-canvas branch →
+  // mapRef.setRectangle(null) + setLastRect(null) → sync effect rewrites the
+  // URL. (Mid-draw toggle-off deliberately KEEPS the persisted rect and the
+  // ?bbox= — only the fresh-canvas gesture drops the box.) A ref could never
+  // do this (no dep changes) — this pin prevents regressing to stale ?bbox=.
   toggleDraw();
   await waitFor(() => expect(window.location.search).not.toContain("bbox="));
 });
 ```
 
-(Bbox serialization order in (c) is `w,s,e,n` from `[[40,23],[38,21]]` — assert against whatever `buildUrlState` emits for those corners; adjust the literal to the serializer's output on first RED run if the corners normalize differently.) **Also extend `bbox_draw.test.tsx`'s existing `afterEach` (:166) with `window.history.replaceState(null, "", "/dashboard");`** — a failed assertion mid-(c) would otherwise leak `?bbox=` into later tests in that file (the happy path self-cleans only because the disarm step rewrites the URL back to bare `/pathname`).
+(Bbox serialization order in (c) is `w,s,e,n` of the machine-normalized corners `[[38,21],[40,23]]` — see the in-test comment; adjust the literal on first RED run only if the serializer formats differently.) **Also extend `bbox_draw.test.tsx`'s existing `afterEach` (:166) with `window.history.replaceState(null, "", "/dashboard");`** — a failed assertion mid-(c)/(d) would otherwise leak `?bbox=` into later tests in that file (the happy path self-cleans only because the re-arm step rewrites the URL back to bare `/pathname`).
+
+**(d) `?bbox=` RESTORE — exactly one bbox POST (Review Focus #2's pin).** Also in `bbox_draw.test.tsx` (URL-keyed `stubFetch`, `vectorResults`/`bboxResults` fixtures at :115/:121):
+
+```tsx
+it("restores ?bbox= on mount with exactly one bbox POST (P1)", async () => {
+  window.history.replaceState(null, "", "/dashboard?bbox=38,21,40,23");
+  stubFetch({
+    "/api/search/vector": { results: vectorResults },
+    "/api/search/bbox": { results: bboxResults },
+  });
+  render(<DashboardPage />);
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  const bboxPosts = fetchMock.mock.calls.filter(([u]) => String(u).includes("/api/search/bbox"));
+  expect(bboxPosts).toHaveLength(1); // runBbox fires ONCE; mapRef.setRectangle is visual only
+  expect(String(fetchMock.mock.calls[0][0])).toContain("/api/search/bbox");
+});
+```
 
 - [ ] **Step 5: Run → FAIL** (no restore; zero vector calls). **Step 6: Implement page wiring:**
 
@@ -451,7 +474,7 @@ if (pendingTileRef.current !== null) {
 ```
 
     Clearing on a miss is mandatory: an uncleared ref would pop the detail open on some *later, unrelated* search that happens to contain the id. A tile id absent from the restore results is dropped (URL sync then clears it — correct: not in this result set). Tile-only URLs with no `q`/`bbox` fetch nothing and open nothing — documented behavior, not a defect.
-  - **Rectangle as STATE, not a ref (post-revision desk fix):** `const [lastRect, setLastRect] = useState<Bbox | null>(null);` — the sync effect must *depend* on the rect so clearing it rewrites the URL. A ref would leave a stale `?bbox=` after disarm (no dep changes → effect never re-runs). Wire: BboxDraw's `onRectangle={(bbox) => { mapRef.current?.setRectangle(bbox); setLastRect(bbox); }}`; `handleToggleRect` disarm branch also calls `setLastRect(null)`.
+  - **Rectangle as STATE, not a ref (post-revision desk fix):** `const [lastRect, setLastRect] = useState<Bbox | null>(null);` — the sync effect must *depend* on the rect so clearing it rewrites the URL. A ref would leave a stale `?bbox=` after the clear (no dep changes → effect never re-runs). Wire: BboxDraw's `onRectangle={(bbox) => { mapRef.current?.setRectangle(box); setLastRect(bbox); }}`; **clear on the RE-ARM / fresh-canvas branch of `handleToggleRect`** — the `next === "rect"` arm that already calls `mapRef.current?.setRectangle(null)` (page.tsx:164) also calls `setLastRect(null)`. **Not** on mid-draw toggle-off (`next === null`): the persisted rect deliberately survives disarm (page.tsx:159-165), so `?bbox=` must survive it too.
   - **Sync effect:**
 
 ```tsx
@@ -466,7 +489,7 @@ useEffect(() => {
 ```
 
   - `BboxDraw`: add `runBbox` via `useImperativeHandle`: `(bbox) => { void runSearch(bbox); onRectangle(bbox); }` — **one** search (restore's `onRectangle` draws the rect and sets `lastRect`; no separate `mapRef.setRectangle` needed).
-  - **Share:** dashboard passes `onShare` to AppHeader: `replaceUrlState(currentState)` then `navigator.clipboard?.writeText(window.location.href)` → `shareStatus` state. Render `<p role="status">{shareStatus}</p>` **only when `shareStatus !== null`** — an unconditional status node breaks strict `getByRole("status")` queries in `search_ui.test.tsx:246` and `telemetry_chart.test.tsx:137`, and empty nodes still match. Missing clipboard → `shareStatus = "Copy from the address bar: " + window.location.href` (Review Focus #4). AppHeader stays dumb (it only calls `onShare`).
+  - **Share:** dashboard passes `onShare` to AppHeader: build the state explicitly — `replaceUrlState({ q: currentQuery || undefined, bbox: lastRect, tile: selectedId })` — then `navigator.clipboard?.writeText(window.location.href)` → `shareStatus` state. Render `<p role="status">{shareStatus}</p>` **only when `shareStatus !== null`** — an unconditional status node breaks the strict `getByRole("status")` query in `search_ui.test.tsx:246` (empty nodes still match). Missing clipboard → `shareStatus = "Copy from the address bar: " + window.location.href` (Review Focus #4). AppHeader stays dumb (it only calls `onShare`).
   - No-params guard: `searched === false` + empty params → sync no-ops, restore no-ops → zero extra fetches (Review Focus #5).
 
 - [ ] **Step 7: Run page test + full gates → green.**
@@ -495,6 +518,7 @@ Methodology: `/home/bono/portfolio/TRIPLE_PASS_VERIFICATION.md` (adapted for a w
 - **Pass 3:** web-only claim ✅ (no API/DB/route changes; check-live's 12 paths untouched); optional-props-only naming ✅ (non-breaking); blast radius 🟡 — `vitest.setup.ts` + 8 suites were undeclared; gate count stale (51→54); stale line anchors; Task 2 missing globals.css in Files.
 - **Verdict: solid with four required fixes — all 11 revisions applied to this document:** (1) floor → 0.28 with 0.27/0.30/0.45 pins incl. the good-query regression test; (2) Task 1 Step 0 global router mock + immediate full-suite check; (3) pending-tile handling in `handleResults`; (4) share-status rendered only when set; plus `toFixed(2)` copy, globals.css in Files, anchor 273-276, test rename, afterEach URL cleanup, 54-warnings baseline, and rectangle-clear handling.
 - **Second desk check (2026-11-05, of the revisions themselves — the verifier could not review post-revision text):** found and fixed **2 defects introduced by the revision round**: (a) pending-tile ref cleared only on hit — an uncleared `?tile=` would pop the detail open on a later unrelated search → now apply-or-clear on first results completion; (b) rect tracked in a **ref** while the sync effect's deps don't change on clear → stale `?bbox=` after disarm → converted to **state** `lastRect` and added to the effect deps (clearing rewrites the URL). Both verified present in the snippets above; no `lastRectRef` remains anywhere in this document.
-- **Third pass (2026-11-14, baseline re-run + TDD-standard gap):** baseline re-verified live — **119/119 tests green**, worktree clean since `1ef1c2a` (the plan's assumed baseline still holds 9 days on; `search_ui` already had `sampleResults` :95, `submitQuery` :117, and an `afterEach` :143 whose URL cleanup the plan now extends instead of adding a second block). Found and closed one remaining gap: **the two 2026-11-05 desk fixes had no pinning tests** (a fix without a failing test is not verified) — Task 5 Step 4 now pins all three: (a) `?q=` restore = exactly one POST, (b) pending-tile apply **and** clear (hit opens; miss-then-later-hit must NOT open — the exact uncleared-ref bug), (c) rect-as-state sync (`?bbox=` appears after draw with the machine's **normalized** corners `38,21,40,23`, disappears on disarm — the exact stale-URL bug). Also corrected the (c) literal to the normalized order the merge test proves.
+- **Third pass (2026-11-14, baseline re-run + TDD-standard gap):** baseline re-verified live — **119/119 tests green**, worktree clean since `1ef1c2a` (the plan's assumed baseline still holds 9 days on; `search_ui` already had `sampleResults` :95, `submitQuery` :128, and an `afterEach` :143 whose URL cleanup the plan now extends instead of adding a second block). Found and closed one remaining gap: **the two 2026-11-05 desk fixes had no pinning tests** (a fix without a failing test is not verified) — Task 5 Step 4 now pins them plus the restore path: (a) `?q=` restore = exactly one POST, (b) pending-tile apply **and** clear (hit opens; miss-then-later-hit must NOT open — the exact uncleared-ref bug), (c) rect-as-state sync (`?bbox=` appears after draw with the machine's **normalized** corners `38,21,40,23`, disappears on re-arm — the exact stale-URL bug).
+- **Fourth pass (2026-11-14, fresh-eyes read of the assembled document):** verdict **solid-with-revisions — all 8 applied.** Blocking find: test (c) mislabeled its own flow — a completed draw **auto-disarms** (BboxDraw close path), so the second `toggleDraw()` **re-arms**; the `setLastRect(null)` clear belongs on the **re-arm/fresh-canvas branch** (next to `setRectangle(null)`, page.tsx:164), NOT on mid-draw toggle-off (the persisted rect deliberately survives disarm). Also applied: new Step 4(d) `?bbox=`-restore pin (Review Focus #2's promised test didn't exist); `bbox_draw.test.tsx` added to Task 5 Files; `submitQuery` cite `:117 → :128`; Share bullet's undefined `currentState` → explicit state object; dropped the false `telemetry_chart:137` citation (that test renders standalone); warnings gate reworded (count may drift ~+2 from the plan's own exhaustive-deps additions — gate is 0 errors); miss-test `setTimeout(0)` → act-covered `findAllByTestId`; Review Focus #5 now names the pre-existing total-count assertion as its no-params pin. ~20 other anchors verified exact (helpers, fixtures, region roles, hero/preview lines, normalized-corners literal).
 - **Lowest-risk execution-time check:** the first full `npx vitest run` after Task 1 Step 0 — proves the setup-level router mock coexists with the file-level mocks in `authguard.test.tsx`/`login.test.tsx` (file-level should win).
 - **Status: waiting for your approval to proceed** — this plan is never auto-executed.
