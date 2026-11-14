@@ -11,6 +11,14 @@ import AppHeader from "../components/AppHeader";
 describe("AppHeader (P0 chrome)", () => {
   beforeEach(() => replace.mockClear());
 
+  it("renders the Share button only when onShare is provided (RF#4 pin)", () => {
+    const { unmount } = render(<AppHeader />);
+    expect(screen.queryByTestId("share-button")).not.toBeInTheDocument();
+    unmount();
+    render(<AppHeader onShare={() => {}} />);
+    expect(screen.getByTestId("share-button")).toBeInTheDocument();
+  });
+
   it("renders wordmark link home, GitHub link, and logout button", () => {
     render(<AppHeader />);
     expect(screen.getByRole("link", { name: /geo-rag earth dashboard/i })).toHaveAttribute("href", "/");

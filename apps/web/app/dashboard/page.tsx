@@ -104,6 +104,11 @@ export default function DashboardPage() {
   const [shareStatus, setShareStatus] = useState<string | null>(null);
   const restoredRef = useRef(false);
   const pendingTileRef = useRef<string | null>(null);
+  // How many restore fetches (?q= and/or ?bbox=) are still in flight — the
+  // tile intent is only applied-or-cleared once ALL of them have produced
+  // results (final-review Critical: the bbox path flows through
+  // handleBboxResults, and q+bbox links race the two responses).
+  const restorePendingFetchesRef = useRef(0);
 
   /** `searchText` covers suggestion clicks (state not yet flushed); a plain
    *  SearchBar submit passes nothing and reads the live input value. */
@@ -120,16 +125,10 @@ export default function DashboardPage() {
     setHoveredId(null);
     setLoading(false);
     setError(null);
-    // Pending-tile apply-or-clear (Task 5): the setSelectedId(null) above
-    // would wipe a restored ?tile=, so it is re-applied here — but only on
-    // the FIRST results completion, and cleared on a MISS too: an uncleared
-    // ref would pop the detail open on some later unrelated search.
-    if (pendingTileRef.current !== null) {
-      if (next.some((r) => r.id === pendingTileRef.current)) {
-        setSelectedId(pendingTileRef.current);
-      }
-      pendingTileRef.current = null;
-    }
+    // One restore fetch (vector path) has produced results — the tile intent
+    // itself is applied-or-cleared by the results effect below, once every
+    // restore fetch has finished (q+bbox links must see the union).
+    if (restorePendingFetchesRef.current > 0) restorePendingFetchesRef.current -= 1;
   }
 
   /** Prev/next step through the ranked hits with wrap-around (Task 9).
@@ -159,6 +158,11 @@ export default function DashboardPage() {
       err instanceof ApiError ? err.message : "Search failed. Please try again.",
     );
     setLoading(false);
+    // A failed restore search drops the tile intent entirely — an armed ref
+    // after an error would pop the detail open on some later unrelated search
+    // (final-review error-path pin).
+    pendingTileRef.current = null;
+    restorePendingFetchesRef.current = 0;
   }
 
   /** Bbox hits merge into the panel (union by id, max score wins) — they do
@@ -167,6 +171,9 @@ export default function DashboardPage() {
     setSearched(true);
     setError(null);
     setResults((prev) => unionByIdMax(prev, incoming));
+    // Second possible restore fetch (bbox path) — same handshake as
+    // handleResults; the results effect applies-or-clears the tile intent.
+    if (restorePendingFetchesRef.current > 0) restorePendingFetchesRef.current -= 1;
   }
 
   /** Rect toggle — the "Draw area" button AND the rect machine's own
@@ -228,14 +235,31 @@ export default function DashboardPage() {
       bboxDrawRef.current?.runBbox?.(s.bbox);
     }
     if (s.tile) {
-      // NOT setSelectedId here — handleResults nulls the selection when the
-      // restore search lands, and tile-only URLs fetch nothing. Applied or
-      // cleared inside handleResults on the first results completion instead.
-      pendingTileRef.current = s.tile;
+      // NOT setSelectedId here — both result handlers null the selection when
+      // a restore search lands, and tile-only URLs fetch nothing. The tile
+      // intent is applied-or-cleared by the results effect once every queued
+      // restore fetch (counted below) has produced results; a tile-only URL
+      // has no fetches, so it is dropped immediately (opens nothing).
+      const queued = (s.q ? 1 : 0) + (s.bbox ? 1 : 0);
+      restorePendingFetchesRef.current = queued;
+      pendingTileRef.current = queued > 0 ? s.tile : null;
     }
     // Deliberate run-once semantics (see comment above).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Apply-or-clear the restored tile exactly once, after ALL restore fetches
+  // have produced results (final-review Critical: the bbox path reaches
+  // results via handleBboxResults, and q+bbox links race two responses —
+  // clearing on the first completion would drop the tile from the union).
+  useEffect(() => {
+    if (pendingTileRef.current === null) return;
+    if (restorePendingFetchesRef.current > 0) return; // sibling still in flight
+    if (results.some((r) => r.id === pendingTileRef.current)) {
+      setSelectedId(pendingTileRef.current);
+    }
+    pendingTileRef.current = null; // clear on MISS too — never stay armed
+  }, [results]);
 
   // P0/P1 Task 5 — keep the URL in sync after user actions. lastRect is in
   // the deps as STATE so clearing it (re-arm) re-fires and drops ?bbox=.
@@ -244,7 +268,10 @@ export default function DashboardPage() {
     replaceUrlState({
       q: currentQuery || undefined,
       bbox: lastRect,
-      tile: selectedId,
+      // While a restore is still in flight the tile lives only in the ref —
+      // include it so `searched` flipping true does not transiently drop
+      // ?tile= from a shared link (final-review Important).
+      tile: selectedId ?? pendingTileRef.current,
     });
     // `results` participates so a union-refresh with a new selection context
     // re-syncs; the URL content itself derives from the named state.
@@ -259,7 +286,11 @@ export default function DashboardPage() {
     <main className="dashboard">
       <AppHeader
         onShare={() => {
-          replaceUrlState({ q: currentQuery || undefined, bbox: lastRect, tile: selectedId });
+          replaceUrlState({
+            q: currentQuery || undefined,
+            bbox: lastRect,
+            tile: selectedId ?? pendingTileRef.current,
+          });
           if (navigator.clipboard?.writeText) {
             void navigator.clipboard.writeText(window.location.href).then(
               () => setShareStatus("Link copied"),

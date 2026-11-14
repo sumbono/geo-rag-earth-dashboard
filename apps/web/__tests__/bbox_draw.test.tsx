@@ -493,4 +493,20 @@ describe("URL bbox state (P0/P1 Task 5)", () => {
     expect(bboxPosts).toHaveLength(1); // runBbox fires ONCE; mapRef.setRectangle is visual only
     expect(String(fetchMock.mock.calls[0][0])).toContain("/api/search/bbox");
   });
+
+  it("restores ?bbox=&tile= — detail opens from the bbox path (final-review Critical)", async () => {
+    // The apply-or-clear lived only in handleResults (vector path); runBbox
+    // restore flows through handleBboxResults — without this pin the shared
+    // spatial link never opens its detail and pendingTileRef stays armed
+    // (the stale-ref bug, alive through the other fetch path).
+    window.history.replaceState(null, "", "/dashboard?bbox=38,21,40,23&tile=tile-2");
+    stubFetch({
+      "/api/search/vector": { results: vectorResults },
+      "/api/search/bbox": { results: bboxResults }, // bboxResults contains tile-2
+    });
+    render(<DashboardPage />);
+    expect(await screen.findByRole("region", { name: "Tile details" })).toBeInTheDocument();
+    // sync keeps the applied tile in the URL
+    expect(window.location.search).toContain("tile=tile-2");
+  });
 });
