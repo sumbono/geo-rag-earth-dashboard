@@ -467,6 +467,20 @@ input:focus-visible {
   margin: 0;
 }
 
+/* --- dashboard header: chrome for the logged-in view (P0/P1 Task 1) --- */
+.dash-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-2xs);
+}
+.dash-header__actions {
+  display: flex;
+  gap: var(--space-2xs);
+  align-items: center;
+}
+
 /* --- results caption: relative-similarity framing (fix-improve Task 2) --- */
 .results-caption {
   margin: 0 0 var(--space-2xs);

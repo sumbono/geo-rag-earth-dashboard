@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+import AppHeader from "../../components/AppHeader";
 import BboxDraw, { type BboxDrawHandle } from "../../components/BboxDraw";
 import DetailPanel from "../../components/DetailPanel";
 import EmptyState from "../../components/EmptyState";
@@ -194,6 +195,7 @@ export default function DashboardPage() {
 
   return (
     <main className="dashboard">
+      <AppHeader />
       <SearchBar
         query={query}
         onQueryChange={setQuery}
