@@ -412,7 +412,7 @@ it("syncs ?bbox= after a completed draw and drops it on disarm (P1)", async () =
 });
 ```
 
-(Bbox serialization order in (c) is `w,s,e,n` from `[[40,23],[38,21]]` — assert against whatever `buildUrlState` emits for those corners; adjust the literal to the serializer's output on first RED run if the corners normalize differently.)
+(Bbox serialization order in (c) is `w,s,e,n` from `[[40,23],[38,21]]` — assert against whatever `buildUrlState` emits for those corners; adjust the literal to the serializer's output on first RED run if the corners normalize differently.) **Also extend `bbox_draw.test.tsx`'s existing `afterEach` (:166) with `window.history.replaceState(null, "", "/dashboard");`** — a failed assertion mid-(c) would otherwise leak `?bbox=` into later tests in that file (the happy path self-cleans only because the disarm step rewrites the URL back to bare `/pathname`).
 
 - [ ] **Step 5: Run → FAIL** (no restore; zero vector calls). **Step 6: Implement page wiring:**
 
