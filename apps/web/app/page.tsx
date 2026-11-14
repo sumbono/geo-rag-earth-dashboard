@@ -73,6 +73,33 @@ export default function Home() {
           </aside>
         </section>
 
+        {/* 2b. engineering band — the 60-second skim's skill story (P0/P1
+            Task 4). Text/CSS chips only: CSP img-src forbids external badge
+            images. Demo-video slot reserved for the owner's walkthrough. */}
+        <section className="stack" aria-label="How it's built">
+          <div className="stack__inner">
+            <p className="stack__pitch">
+              Built end-to-end — FastAPI · PostGIS + pgvector · RemoteCLIP
+              embeddings · Next.js · MapLibre GL · Docker · GitHub Actions
+            </p>
+            <div className="stack__chips" data-testid="stack-chips">
+              <span className="stack__chip">PostGIS/pgvector</span>
+              <span className="stack__chip">RemoteCLIP</span>
+              <span className="stack__chip">FastAPI</span>
+              <span className="stack__chip">Next.js</span>
+              <span className="stack__chip">MapLibre</span>
+              <span className="stack__chip">Docker</span>
+              <span className="stack__chip">CI + ~250 tests</span>
+            </div>
+            <a
+              className="stack__link"
+              href="https://github.com/sumbono/geo-rag-earth-dashboard"
+            >
+              Source &amp; architecture →
+            </a>
+          </div>
+        </section>
+
         {/* 3. workbench band — the walkthrough GIF as hero proof */}
         <section className="preview" aria-label="Product preview">
           <figure className="preview__slot" data-testid="gif-slot">
