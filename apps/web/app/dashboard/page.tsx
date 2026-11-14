@@ -15,7 +15,8 @@ import SearchBar from "../../components/SearchBar";
 import TelemetryChart from "../../components/TelemetryChart";
 import { ApiError, searchVector } from "../../lib/api";
 import { downloadText, resultsToCSV, resultsToGeoJSON } from "../../lib/export";
-import type { SearchResult } from "../../lib/types";
+import { parseUrlState, replaceUrlState } from "../../lib/urlState";
+import type { Bbox, SearchResult } from "../../lib/types";
 
 // three.js must never load during SSR — client-only, loaded on demand when
 // the 3D tab is first opened.
@@ -96,6 +97,13 @@ export default function DashboardPage() {
   // `key` remounts the panel on every prev/next, so the pressed button is a
   // new DOM node — this tells it which button to re-focus.
   const pendingFocusRef = useRef<"prev" | "next" | null>(null);
+  // P0/P1 Task 5 — shareable URL state.
+  // lastRect is STATE (not a ref): the sync effect depends on it, so clearing
+  // it on re-arm re-fires the effect and drops ?bbox= from the URL.
+  const [lastRect, setLastRect] = useState<Bbox | null>(null);
+  const [shareStatus, setShareStatus] = useState<string | null>(null);
+  const restoredRef = useRef(false);
+  const pendingTileRef = useRef<string | null>(null);
 
   /** `searchText` covers suggestion clicks (state not yet flushed); a plain
    *  SearchBar submit passes nothing and reads the live input value. */
@@ -112,6 +120,16 @@ export default function DashboardPage() {
     setHoveredId(null);
     setLoading(false);
     setError(null);
+    // Pending-tile apply-or-clear (Task 5): the setSelectedId(null) above
+    // would wipe a restored ?tile=, so it is re-applied here — but only on
+    // the FIRST results completion, and cleared on a MISS too: an uncleared
+    // ref would pop the detail open on some later unrelated search.
+    if (pendingTileRef.current !== null) {
+      if (next.some((r) => r.id === pendingTileRef.current)) {
+        setSelectedId(pendingTileRef.current);
+      }
+      pendingTileRef.current = null;
+    }
   }
 
   /** Prev/next step through the ranked hits with wrap-around (Task 9).
@@ -162,7 +180,13 @@ export default function DashboardPage() {
     setDrawShape(next);
     mapRef.current?.setPreviewRectangle(null);
     mapRef.current?.setPolygon(null);
-    if (next === "rect") mapRef.current?.setRectangle(null);
+    if (next === "rect") {
+      // Re-arm = fresh canvas: the persisted rect is dropped (pre-existing
+      // behavior) — lastRect must drop with it or ?bbox= goes stale (Task 5).
+      // Mid-draw toggle-off (next === null) deliberately keeps both.
+      mapRef.current?.setRectangle(null);
+      setLastRect(null);
+    }
   }
 
   /** Polygon toggle: arms polygon (fresh vertices in BboxDraw) or disarms.
@@ -188,6 +212,44 @@ export default function DashboardPage() {
     }
   }
 
+  // P0/P1 Task 5 — restore ONCE from the URL. Run-once ref: replaceState
+  // never re-fires this effect (Review Focus #1's single-POST pin).
+  useEffect(() => {
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    const s = parseUrlState(window.location.search);
+    if (s.q) {
+      setQuery(s.q);
+      void handleSuggest(s.q); // complete text-search path
+    }
+    if (s.bbox) {
+      // runBbox emits onRectangle → map draws it + setLastRect; the ONE
+      // search POST is runBbox's (Review Focus #2).
+      bboxDrawRef.current?.runBbox?.(s.bbox);
+    }
+    if (s.tile) {
+      // NOT setSelectedId here — handleResults nulls the selection when the
+      // restore search lands, and tile-only URLs fetch nothing. Applied or
+      // cleared inside handleResults on the first results completion instead.
+      pendingTileRef.current = s.tile;
+    }
+    // Deliberate run-once semantics (see comment above).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // P0/P1 Task 5 — keep the URL in sync after user actions. lastRect is in
+  // the deps as STATE so clearing it (re-arm) re-fires and drops ?bbox=.
+  useEffect(() => {
+    if (!searched) return;
+    replaceUrlState({
+      q: currentQuery || undefined,
+      bbox: lastRect,
+      tile: selectedId,
+    });
+    // `results` participates so a union-refresh with a new selection context
+    // re-syncs; the URL content itself derives from the named state.
+  }, [searched, currentQuery, selectedId, results, lastRect]);
+
   const selectedTile =
     selectedId === null
       ? null
@@ -195,7 +257,28 @@ export default function DashboardPage() {
 
   return (
     <main className="dashboard">
-      <AppHeader />
+      <AppHeader
+        onShare={() => {
+          replaceUrlState({ q: currentQuery || undefined, bbox: lastRect, tile: selectedId });
+          if (navigator.clipboard?.writeText) {
+            void navigator.clipboard.writeText(window.location.href).then(
+              () => setShareStatus("Link copied"),
+              () =>
+                setShareStatus(
+                  "Copy from the address bar: " + window.location.href,
+                ),
+            );
+          } else {
+            // Insecure context / jsdom: show the URL for manual copy (RF#4).
+            setShareStatus("Copy from the address bar: " + window.location.href);
+          }
+        }}
+      />
+      {shareStatus !== null && (
+        <p role="status" className="dash-share-status">
+          {shareStatus}
+        </p>
+      )}
       <SearchBar
         query={query}
         onQueryChange={setQuery}
@@ -212,7 +295,10 @@ export default function DashboardPage() {
         onTogglePolygon={handleTogglePolygon}
         currentQuery={currentQuery}
         onResults={handleBboxResults}
-        onRectangle={(bbox) => mapRef.current?.setRectangle(bbox)}
+        onRectangle={(bbox) => {
+          mapRef.current?.setRectangle(bbox);
+          setLastRect(bbox);
+        }}
         onPreview={(bbox) => mapRef.current?.setPreviewRectangle(bbox)}
         onPolygon={(polygon) => mapRef.current?.setPolygon(polygon)}
         onError={handleError}
