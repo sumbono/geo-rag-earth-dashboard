@@ -276,7 +276,16 @@ export default function DashboardPage() {
           ) : searched ? (
             // Issue 8: gate on `loading` so a first (or repeat) search in
             // flight never flashes EmptyState before the response lands.
-            loading ? null : <EmptyState onSuggest={handleSuggest} />
+            loading ? null : (
+              <EmptyState
+                onSuggest={handleSuggest}
+                hint={
+                  currentQuery === ""
+                    ? "Nothing indexed in this area — the dashed outline on the map shows what's searchable."
+                    : undefined
+                }
+              />
+            )
           ) : (
             <FirstRunGuide visible onSuggest={handleSuggest} />
           )}
