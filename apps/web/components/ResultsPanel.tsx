@@ -2,6 +2,14 @@
 
 import type { SearchResult } from "../lib/types";
 
+/** Weak-match floor for ranked results (P0/P1 Task 2). Calibrated to the
+ *  audit's observed band on this fixed 100-chip index: a junk query tops at
+ *  0.27 and the good on-theme query tops at 0.30, so the floor sits strictly
+ *  above junk and at/below good (0.27 < 0.28 ≤ 0.30). Data-pinned on purpose:
+ *  erring above the floor only ever suppresses the notice, never false-alarms
+ *  a real query (the exact failure a 0.35 floor would cause). */
+const WEAK_MATCH_FLOOR = 0.28;
+
 export interface ResultsPanelProps {
   results: SearchResult[];
   /** Currently picked hit — highlighted row; owned by the page. */
@@ -16,6 +24,10 @@ export interface ResultsPanelProps {
    *  `onHover`. */
   onExportGeoJSON?: () => void;
   onExportCSV?: () => void;
+  /** "ranked" (text search, cosine scores) vs "recency" (spatial-only browse,
+   *  scores are 0.00 placeholders). Default "ranked" keeps existing renders
+   *  valid; the page derives it from `currentQuery !== ""`. */
+  mode?: "ranked" | "recency";
 }
 
 /**
@@ -35,6 +47,7 @@ export default function ResultsPanel({
   onHover,
   onExportGeoJSON,
   onExportCSV,
+  mode = "ranked",
 }: ResultsPanelProps) {
   return (
     // One root element (final-review fix): this component is a direct child
@@ -62,8 +75,19 @@ export default function ResultsPanel({
         </div>
       )}
       <p className="results-caption" data-testid="score-caption">
-        Relative similarity within these results (CLIP cosine) — best first.
+        {mode === "recency"
+          ? "Newest first in this area — no text query yet."
+          : "Relative similarity within these results (CLIP cosine) — best first."}
       </p>
+      {mode === "ranked" &&
+        results.length > 0 &&
+        results[0].score < WEAK_MATCH_FLOOR && (
+          <p role="status" className="weak-match" data-testid="weak-match-notice">
+            Low-confidence matches (top {results[0].score.toFixed(2)}) — this query
+            may be outside the indexed imagery. Try describing a scene, e.g.
+            “turquoise water near a reef”.
+          </p>
+        )}
       <ul
       aria-label="Search results"
       style={{

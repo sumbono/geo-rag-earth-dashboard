@@ -74,3 +74,14 @@ describe("landing page", () => {
     expect(screen.getAllByRole("link").some((a) => a.getAttribute("href") === "/login")).toBe(true);
   });
 });
+
+describe("landing engineering band (P0/P1 Task 4)", () => {
+  it("shows the engineering band (P0 showcase)", () => {
+    render(<Page />);
+    const chips = screen.getByTestId("stack-chips");
+    expect(chips).toHaveTextContent("PostGIS/pgvector");
+    expect(chips).toHaveTextContent("RemoteCLIP");
+    expect(chips).toHaveTextContent("CI + ~250 tests");
+    expect(screen.getByRole("region", { name: "How it's built" })).toBeInTheDocument();
+  });
+});

@@ -59,3 +59,38 @@ describe("ResultsPanel relative-similarity framing (fix-improve Task 2)", () => 
     expect(container.children).toHaveLength(1);
   });
 });
+
+describe("ResultsPanel weak-match + recency framing (P0/P1 Task 2)", () => {
+  it("shows no weak-match notice for a healthy top score (TWO[0] = 0.91)", () => {
+    render(<ResultsPanel results={TWO} onPick={() => {}} />);
+    expect(screen.queryByTestId("weak-match-notice")).not.toBeInTheDocument();
+  });
+
+  it("shows the notice for junk-query scores (0.27 — audit-observed band)", () => {
+    const weak: SearchResult[] = TWO.map((r, i) => ({ ...r, score: 0.27 - i * 0.01 }));
+    render(<ResultsPanel results={weak} onPick={() => {}} />);
+    expect(screen.getByTestId("weak-match-notice")).toHaveTextContent(/low-confidence/i);
+    expect(screen.getByTestId("weak-match-notice")).toHaveTextContent("top 0.27"); // toFixed(2) pin
+  });
+
+  it("shows NO notice at 0.30 — the good on-query top score (regression pin)", () => {
+    // Audit evidence: "turquoise coastal water" tops at 0.30. A floor above
+    // this would banner every real query — the exact failure this pin prevents.
+    const good: SearchResult[] = TWO.map((r, i) => ({ ...r, score: 0.3 - i * 0.01 }));
+    render(<ResultsPanel results={good} onPick={() => {}} />);
+    expect(screen.queryByTestId("weak-match-notice")).not.toBeInTheDocument();
+  });
+
+  it("shows NO notice at 0.45 (well clear of the floor)", () => {
+    const ok: SearchResult[] = TWO.map((r, i) => ({ ...r, score: 0.45 - i * 0.01 }));
+    render(<ResultsPanel results={ok} onPick={() => {}} />);
+    expect(screen.queryByTestId("weak-match-notice")).not.toBeInTheDocument();
+  });
+
+  it("recency mode swaps the caption and never shows the weak-match notice", () => {
+    const recency = TWO.map((r) => ({ ...r, score: 0 }));
+    render(<ResultsPanel results={recency} onPick={() => {}} mode="recency" />);
+    expect(screen.getByTestId("score-caption")).toHaveTextContent(/newest first in this area/i);
+    expect(screen.queryByTestId("weak-match-notice")).not.toBeInTheDocument();
+  });
+});

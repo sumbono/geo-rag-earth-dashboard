@@ -7,6 +7,12 @@ import type { Bbox, SearchResult } from "../lib/types";
 export interface BboxDrawHandle {
   /** Feed a raw map click (`[lon, lat]`) into the two-click machine. */
   handleMapClick: (lonLat: [number, number]) => void;
+  /** URL-restore path (P0/P1 Task 5): run the bbox search for an already
+   *  completed rectangle exactly once and emit `onRectangle` (visual only on
+   *  the map side — no second search). Optional so existing handle fakes stay
+   *  type-valid; at restore time drawShape is off, so no close-path bookkeeping
+   *  applies. */
+  runBbox?: (bbox: Bbox) => void;
 }
 
 export interface BboxDrawProps {
@@ -256,9 +262,17 @@ export default function BboxDraw({
     void runSearch(bbox);
   }
 
+  /** Restore path (Task 5): ONE bbox search + one onRectangle emit. The
+   *  two-click machine is untouched — drawShape is off at restore time, so
+   *  no disarm/close bookkeeping applies. */
+  function runBbox(bbox: Bbox) {
+    void runSearch(bbox);
+    onRectangle(bbox);
+  }
+
   useImperativeHandle(
     ref,
-    () => ({ handleMapClick }),
+    () => ({ handleMapClick, runBbox }),
     [
       active,
       polygonMode,

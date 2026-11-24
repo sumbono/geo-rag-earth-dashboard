@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+import AppHeader from "../../components/AppHeader";
 import BboxDraw, { type BboxDrawHandle } from "../../components/BboxDraw";
 import DetailPanel from "../../components/DetailPanel";
 import EmptyState from "../../components/EmptyState";
@@ -14,7 +15,8 @@ import SearchBar from "../../components/SearchBar";
 import TelemetryChart from "../../components/TelemetryChart";
 import { ApiError, searchVector } from "../../lib/api";
 import { downloadText, resultsToCSV, resultsToGeoJSON } from "../../lib/export";
-import type { SearchResult } from "../../lib/types";
+import { parseUrlState, replaceUrlState } from "../../lib/urlState";
+import type { Bbox, SearchResult } from "../../lib/types";
 
 // three.js must never load during SSR — client-only, loaded on demand when
 // the 3D tab is first opened.
@@ -95,6 +97,18 @@ export default function DashboardPage() {
   // `key` remounts the panel on every prev/next, so the pressed button is a
   // new DOM node — this tells it which button to re-focus.
   const pendingFocusRef = useRef<"prev" | "next" | null>(null);
+  // P0/P1 Task 5 — shareable URL state.
+  // lastRect is STATE (not a ref): the sync effect depends on it, so clearing
+  // it on re-arm re-fires the effect and drops ?bbox= from the URL.
+  const [lastRect, setLastRect] = useState<Bbox | null>(null);
+  const [shareStatus, setShareStatus] = useState<string | null>(null);
+  const restoredRef = useRef(false);
+  const pendingTileRef = useRef<string | null>(null);
+  // How many restore fetches (?q= and/or ?bbox=) are still in flight — the
+  // tile intent is only applied-or-cleared once ALL of them have produced
+  // results (final-review Critical: the bbox path flows through
+  // handleBboxResults, and q+bbox links race the two responses).
+  const restorePendingFetchesRef = useRef(0);
 
   /** `searchText` covers suggestion clicks (state not yet flushed); a plain
    *  SearchBar submit passes nothing and reads the live input value. */
@@ -111,6 +125,10 @@ export default function DashboardPage() {
     setHoveredId(null);
     setLoading(false);
     setError(null);
+    // One restore fetch (vector path) has produced results — the tile intent
+    // itself is applied-or-cleared by the results effect below, once every
+    // restore fetch has finished (q+bbox links must see the union).
+    if (restorePendingFetchesRef.current > 0) restorePendingFetchesRef.current -= 1;
   }
 
   /** Prev/next step through the ranked hits with wrap-around (Task 9).
@@ -140,6 +158,11 @@ export default function DashboardPage() {
       err instanceof ApiError ? err.message : "Search failed. Please try again.",
     );
     setLoading(false);
+    // A failed restore search drops the tile intent entirely — an armed ref
+    // after an error would pop the detail open on some later unrelated search
+    // (final-review error-path pin).
+    pendingTileRef.current = null;
+    restorePendingFetchesRef.current = 0;
   }
 
   /** Bbox hits merge into the panel (union by id, max score wins) — they do
@@ -148,6 +171,9 @@ export default function DashboardPage() {
     setSearched(true);
     setError(null);
     setResults((prev) => unionByIdMax(prev, incoming));
+    // Second possible restore fetch (bbox path) — same handshake as
+    // handleResults; the results effect applies-or-clears the tile intent.
+    if (restorePendingFetchesRef.current > 0) restorePendingFetchesRef.current -= 1;
   }
 
   /** Rect toggle — the "Draw area" button AND the rect machine's own
@@ -161,7 +187,13 @@ export default function DashboardPage() {
     setDrawShape(next);
     mapRef.current?.setPreviewRectangle(null);
     mapRef.current?.setPolygon(null);
-    if (next === "rect") mapRef.current?.setRectangle(null);
+    if (next === "rect") {
+      // Re-arm = fresh canvas: the persisted rect is dropped (pre-existing
+      // behavior) — lastRect must drop with it or ?bbox= goes stale (Task 5).
+      // Mid-draw toggle-off (next === null) deliberately keeps both.
+      mapRef.current?.setRectangle(null);
+      setLastRect(null);
+    }
   }
 
   /** Polygon toggle: arms polygon (fresh vertices in BboxDraw) or disarms.
@@ -187,6 +219,64 @@ export default function DashboardPage() {
     }
   }
 
+  // P0/P1 Task 5 — restore ONCE from the URL. Run-once ref: replaceState
+  // never re-fires this effect (Review Focus #1's single-POST pin).
+  useEffect(() => {
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    const s = parseUrlState(window.location.search);
+    if (s.q) {
+      setQuery(s.q);
+      void handleSuggest(s.q); // complete text-search path
+    }
+    if (s.bbox) {
+      // runBbox emits onRectangle → map draws it + setLastRect; the ONE
+      // search POST is runBbox's (Review Focus #2).
+      bboxDrawRef.current?.runBbox?.(s.bbox);
+    }
+    if (s.tile) {
+      // NOT setSelectedId here — both result handlers null the selection when
+      // a restore search lands, and tile-only URLs fetch nothing. The tile
+      // intent is applied-or-cleared by the results effect once every queued
+      // restore fetch (counted below) has produced results; a tile-only URL
+      // has no fetches, so it is dropped immediately (opens nothing).
+      const queued = (s.q ? 1 : 0) + (s.bbox ? 1 : 0);
+      restorePendingFetchesRef.current = queued;
+      pendingTileRef.current = queued > 0 ? s.tile : null;
+    }
+    // Deliberate run-once semantics (see comment above).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Apply-or-clear the restored tile exactly once, after ALL restore fetches
+  // have produced results (final-review Critical: the bbox path reaches
+  // results via handleBboxResults, and q+bbox links race two responses —
+  // clearing on the first completion would drop the tile from the union).
+  useEffect(() => {
+    if (pendingTileRef.current === null) return;
+    if (restorePendingFetchesRef.current > 0) return; // sibling still in flight
+    if (results.some((r) => r.id === pendingTileRef.current)) {
+      setSelectedId(pendingTileRef.current);
+    }
+    pendingTileRef.current = null; // clear on MISS too — never stay armed
+  }, [results]);
+
+  // P0/P1 Task 5 — keep the URL in sync after user actions. lastRect is in
+  // the deps as STATE so clearing it (re-arm) re-fires and drops ?bbox=.
+  useEffect(() => {
+    if (!searched) return;
+    replaceUrlState({
+      q: currentQuery || undefined,
+      bbox: lastRect,
+      // While a restore is still in flight the tile lives only in the ref —
+      // include it so `searched` flipping true does not transiently drop
+      // ?tile= from a shared link (final-review Important).
+      tile: selectedId ?? pendingTileRef.current,
+    });
+    // `results` participates so a union-refresh with a new selection context
+    // re-syncs; the URL content itself derives from the named state.
+  }, [searched, currentQuery, selectedId, results, lastRect]);
+
   const selectedTile =
     selectedId === null
       ? null
@@ -194,6 +284,32 @@ export default function DashboardPage() {
 
   return (
     <main className="dashboard">
+      <AppHeader
+        onShare={() => {
+          replaceUrlState({
+            q: currentQuery || undefined,
+            bbox: lastRect,
+            tile: selectedId ?? pendingTileRef.current,
+          });
+          if (navigator.clipboard?.writeText) {
+            void navigator.clipboard.writeText(window.location.href).then(
+              () => setShareStatus("Link copied"),
+              () =>
+                setShareStatus(
+                  "Copy from the address bar: " + window.location.href,
+                ),
+            );
+          } else {
+            // Insecure context / jsdom: show the URL for manual copy (RF#4).
+            setShareStatus("Copy from the address bar: " + window.location.href);
+          }
+        }}
+      />
+      {shareStatus !== null && (
+        <p role="status" className="dash-share-status">
+          {shareStatus}
+        </p>
+      )}
       <SearchBar
         query={query}
         onQueryChange={setQuery}
@@ -210,7 +326,10 @@ export default function DashboardPage() {
         onTogglePolygon={handleTogglePolygon}
         currentQuery={currentQuery}
         onResults={handleBboxResults}
-        onRectangle={(bbox) => mapRef.current?.setRectangle(bbox)}
+        onRectangle={(bbox) => {
+          mapRef.current?.setRectangle(bbox);
+          setLastRect(bbox);
+        }}
         onPreview={(bbox) => mapRef.current?.setPreviewRectangle(bbox)}
         onPolygon={(polygon) => mapRef.current?.setPolygon(polygon)}
         onError={handleError}
@@ -259,6 +378,7 @@ export default function DashboardPage() {
               selectedId={selectedId}
               onPick={setSelectedId}
               onHover={setHoveredId}
+              mode={currentQuery !== "" ? "ranked" : "recency"}
               onExportGeoJSON={() =>
                 downloadText(
                   "search-results.geojson",
@@ -273,7 +393,16 @@ export default function DashboardPage() {
           ) : searched ? (
             // Issue 8: gate on `loading` so a first (or repeat) search in
             // flight never flashes EmptyState before the response lands.
-            loading ? null : <EmptyState onSuggest={handleSuggest} />
+            loading ? null : (
+              <EmptyState
+                onSuggest={handleSuggest}
+                hint={
+                  currentQuery === ""
+                    ? "Nothing indexed in this area — the dashed outline on the map shows what's searchable."
+                    : undefined
+                }
+              />
+            )
           ) : (
             <FirstRunGuide visible onSuggest={handleSuggest} />
           )}

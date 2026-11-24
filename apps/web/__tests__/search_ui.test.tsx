@@ -141,6 +141,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // URL-restore tests mutate location.search — clear it before anything else
+  // so a failed assertion cannot leak ?q=/?tile= into later tests (P0/P1 T5).
+  window.history.replaceState(null, "", "/dashboard");
   // Collect before restoring so a failure still cleans up the spies.
   const errors = consoleError.mock.calls.map((args: unknown[]) => String(args[0]));
   const warns = consoleWarn.mock.calls.map((args: unknown[]) => String(args[0]));
@@ -386,5 +389,74 @@ describe("map", () => {
     expect(
       screen.getByRole("button", { name: /0\.88/ }),
     ).toHaveAttribute("aria-current", "true");
+  });
+});
+
+describe("URL restore + pending tile (P0/P1 Task 5)", () => {
+  it("restores ?q= on mount with exactly one search POST", async () => {
+    window.history.replaceState(null, "", "/dashboard?q=turquoise%20water");
+    stubFetch(200, { results: [] });
+    render(<DashboardPage />);
+    await waitFor(() => {
+      const searchCalls = fetchMock.mock.calls.filter(([u]) => String(u).includes("/api/search/vector"));
+      expect(searchCalls).toHaveLength(1);
+    });
+  });
+
+  it("applies the restored tile when first results contain it", async () => {
+    window.history.replaceState(null, "", "/dashboard?q=water&tile=tile-1");
+    stubFetch(200, { results: sampleResults }); // sampleResults[0].id = "tile-1"
+    render(<DashboardPage />);
+    expect(await screen.findByRole("region", { name: "Tile details" })).toBeInTheDocument();
+  });
+
+  it("clears a missing restored tile — a later search containing it never opens the detail", async () => {
+    window.history.replaceState(null, "", "/dashboard?q=water&tile=ghost-id");
+    const resp = (body: unknown) =>
+      new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    fetchMock
+      .mockImplementationOnce(() => Promise.resolve(resp({ results: sampleResults }))) // miss → clear
+      .mockImplementationOnce(() =>
+        Promise.resolve(resp({ results: [...sampleResults, { ...sampleResults[0], id: "ghost-id" }] })),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<DashboardPage />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    submitQuery("reef"); // second search now CONTAINS ghost-id
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    // Act-covered wait on a real artifact of the 2nd response (the existing
+    // afterEach asserts console-clean — no bare setTimeout outside act()).
+    await screen.findAllByTestId("result-row");
+    expect(screen.queryByRole("region", { name: "Tile details" })).not.toBeInTheDocument();
+  });
+
+  it("a failed restore search clears the tile intent — later searches never pop it (final-review)", async () => {
+    window.history.replaceState(null, "", "/dashboard?q=water&tile=ghost-id");
+    const resp = (body: unknown) =>
+      new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    fetchMock
+      .mockImplementationOnce(() => Promise.reject(new Error("network down"))) // restore search dies
+      .mockImplementationOnce(() =>
+        Promise.resolve(
+          resp({ results: [...sampleResults, { ...sampleResults[0], id: "ghost-id" }] }),
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<DashboardPage />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    submitQuery("reef"); // a LATER user search that happens to contain ghost-id
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await screen.findAllByTestId("result-row");
+    expect(screen.queryByRole("region", { name: "Tile details" })).not.toBeInTheDocument();
+  });
+
+  it("Share falls back to showing the URL when clipboard is unavailable (RF#4 pin)", async () => {
+    // Force the insecure-context path deterministically: jsdom's clipboard
+    // varies by environment, and RF#4 requires the fallback to be real.
+    Object.defineProperty(window.navigator, "clipboard", { value: undefined, configurable: true });
+    stubFetch(200, { results: [] });
+    render(<DashboardPage />);
+    fireEvent.click(screen.getByTestId("share-button"));
+    expect(await screen.findByRole("status")).toHaveTextContent(/copy from the address bar/i);
   });
 });

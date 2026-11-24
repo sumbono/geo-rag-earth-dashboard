@@ -164,6 +164,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // URL-sync tests mutate location.search — clear it before anything else so
+  // a failed assertion cannot leak ?bbox= into later tests (P0/P1 Task 5).
+  window.history.replaceState(null, "", "/dashboard");
   // Collect before restoring so a failure still cleans up the spies.
   const errors = consoleError.mock.calls.map((args: unknown[]) => String(args[0]));
   const warns = consoleWarn.mock.calls.map((args: unknown[]) => String(args[0]));
@@ -449,5 +452,61 @@ describe("bbox draw search", () => {
     expect(
       screen.getByRole("button", { name: "Draw area" }),
     ).toHaveAttribute("aria-pressed", "false");
+  });
+});
+
+describe("URL bbox state (P0/P1 Task 5)", () => {
+  it("syncs ?bbox= after a completed draw and drops it on re-arm (fresh canvas)", async () => {
+    stubFetch({
+      "/api/search/vector": { results: vectorResults },
+      "/api/search/bbox": { results: bboxResults },
+    });
+    render(<DashboardPage />);
+    submitQuery("water");
+    expect(await screen.findByText("0.88")).toBeInTheDocument();
+
+    toggleDraw();
+    drawClick(40, 23);
+    drawClick(38, 21);
+    // The rect machine normalizes corners to [[w,s],[e,n]] before onRectangle
+    // (merge test asserts body [[38,21],[40,23]]) — so lastRect (and the URL)
+    // carries 38,21,40,23, not the raw click order.
+    await waitFor(() => expect(window.location.search).toContain("bbox=38,21,40,23"));
+
+    // A completed draw AUTO-disarms, so this second toggle RE-ARMS →
+    // fresh-canvas branch → setRectangle(null) + setLastRect(null) → sync
+    // effect rewrites the URL. (Mid-draw toggle-off deliberately KEEPS the
+    // persisted rect and ?bbox= — only the fresh-canvas gesture drops it.)
+    toggleDraw();
+    await waitFor(() => expect(window.location.search).not.toContain("bbox="));
+  });
+
+  it("restores ?bbox= on mount with exactly one bbox POST", async () => {
+    window.history.replaceState(null, "", "/dashboard?bbox=38,21,40,23");
+    stubFetch({
+      "/api/search/vector": { results: vectorResults },
+      "/api/search/bbox": { results: bboxResults },
+    });
+    render(<DashboardPage />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const bboxPosts = fetchMock.mock.calls.filter(([u]) => String(u).includes("/api/search/bbox"));
+    expect(bboxPosts).toHaveLength(1); // runBbox fires ONCE; mapRef.setRectangle is visual only
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/api/search/bbox");
+  });
+
+  it("restores ?bbox=&tile= — detail opens from the bbox path (final-review Critical)", async () => {
+    // The apply-or-clear lived only in handleResults (vector path); runBbox
+    // restore flows through handleBboxResults — without this pin the shared
+    // spatial link never opens its detail and pendingTileRef stays armed
+    // (the stale-ref bug, alive through the other fetch path).
+    window.history.replaceState(null, "", "/dashboard?bbox=38,21,40,23&tile=tile-2");
+    stubFetch({
+      "/api/search/vector": { results: vectorResults },
+      "/api/search/bbox": { results: bboxResults }, // bboxResults contains tile-2
+    });
+    render(<DashboardPage />);
+    expect(await screen.findByRole("region", { name: "Tile details" })).toBeInTheDocument();
+    // sync keeps the applied tile in the URL
+    expect(window.location.search).toContain("tile=tile-2");
   });
 });
